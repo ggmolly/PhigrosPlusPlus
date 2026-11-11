@@ -100,6 +100,7 @@ end
 
 local PROFILE_TAB = 1 -- the game's settings tabs are Gameplay, Profile and Misc.
 local choosing -- the name refused, while waiting on the profile tab for the player to save another one
+local forceSync -- sends everything, defined with its button below
 
 -- signing up: a new key's words come first, and only once the player saved them is it registered under the game's
 -- name and written to the device. cancelling drops it. a refused sign up keeps it in memory, so a retry shows the
@@ -125,7 +126,8 @@ local function join()
   if status == 200 then
     if first then identity.save() end
     sync(true)
-    return saveProfile(json.decode(body), now)
+    saveProfile(json.decode(body), now)
+    return forceSync()
   end
   sync(false)
   local title, message, naming = why(status, body)
@@ -289,12 +291,15 @@ end)
 
 on("scene", flush)
 
--- the first scene of a launch tells phigros.tools the player is online, even with nothing to send
+-- the first scene of a launch tells phigros.tools the player is online, even with nothing to send, and gets back the
+-- profile as the server has it (a number changed there shows here)
 local greeted
 on("scene", function()
   if greeted or not sync() or not profile then return end
   greeted = true
-  phigrospp.signed("POST", "/api/me", "", function() end)
+  phigrospp.signed("POST", "/api/me", "", function(status, body)
+    if status == 200 then saveProfile(json.decode(body), profile.sent) end
+  end)
 end)
 
 -- a profile made on another device, from its 16 words: the key is checked with the server before it's kept, and replaces the
@@ -328,7 +333,7 @@ local function restore()
   saveProfile(json.decode(body), { name = "", intro = "", avatar = "", background = "", unlisted = false })
   sync(true)
   toast("Welcome back, " .. tag())
-  update()
+  forceSync()
 end
 
 -- the tab holds the sync toggle and restoring, and the profile's rows once there's one
@@ -397,10 +402,10 @@ on("setting", function(label, value)
 end)
 -- everything at once: the profile as the game has it, every record as the game says them (the site marks them
 -- imported, only replays prove a score, so a kept replay of the exact score goes along and stands in for its record),
--- the save if the player uploads it, and what waits in the outbox
+-- the save if the player uploads it, and what waits in the outbox. it runs once signed up or restored too
 local forcing
 
-button("Force sync", function()
+function forceSync()
   if forcing then return end
   forcing = true
   -- the rest counts as never sent, so update sends it all (a name not renamed goes as the server has it)
@@ -426,6 +431,8 @@ button("Force sync", function()
   saveOutbox()
   saveChanged = true
   flush()
-end, TAB, joined)
+end
+
+button("Force sync", forceSync, TAB, joined)
 button("Show recovery phrase", function() showPhrase(false) end, TAB, joined)
 button("Restore a profile", restore, TAB)
