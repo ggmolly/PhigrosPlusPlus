@@ -1,0 +1,65 @@
+# phigros++ development against the device plugged in over adb, see the wiki's Development page
+
+APKS ?= ../apks/Phigros-4.0.1.2
+# Phigros++ installs as its own app, next to the game
+export PACKAGE := sh.molly.phigrosplusplus
+LIB := build/libphigrospp.so
+SPLIT := out/split_config.arm64_v8a.apk
+
+# every target talks to the same device or files, one at a time
+.NOTPARALLEL:
+
+.PHONY: all lib apk verify install install-full push push-core reset start stop restart logs dev release clean
+
+all: apk
+
+lib: $(LIB)
+$(LIB): $(wildcard phigrospp/* phigrospp/lua/* mods/* mods/*/* vendor/lua-5.4.7/src/* vendor/tweetnacl/*) \
+		scripts/build-lib.sh scripts/bundle.sh $(APKS)/base.apk
+	scripts/build-lib.sh $(APKS)
+
+apk: $(SPLIT)
+$(SPLIT): $(LIB) scripts/build-apk.sh scripts/patch_libmain.py scripts/patch_apk.py $(wildcard $(APKS)/*.apk)
+	scripts/build-apk.sh $(APKS)
+
+# checks that the apks of a release (RELEASE=<folder>) are these, signature aside
+verify: $(SPLIT)
+	set -e; for apk in $(RELEASE)/*.apk; do apksigcopier compare --min-sdk-version 24 $$apk out/$${apk##*/}; echo "same: $${apk##*/}"; done
+
+# only the native split, the game data and the other splits stay
+install: $(SPLIT)
+	adb install-multiple -p $(PACKAGE) $(SPLIT)
+
+install-full: $(SPLIT)
+	adb install-multiple -r out/*.apk
+
+push:
+	scripts/push.sh
+
+push-core:
+	scripts/push.sh --core
+
+reset:
+	scripts/push.sh --reset
+
+start:
+	adb shell monkey -p $(PACKAGE) -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+
+stop:
+	adb shell am force-stop $(PACKAGE)
+
+restart: stop start
+
+logs:
+	adb logcat -s 'phigros++' DEBUG
+
+# the signed bundle and its version line in out/, for a github release (needs PHIGROSPP_SIGNING_KEY)
+release:
+	scripts/release.sh
+
+dev: install push
+	adb logcat -c
+	$(MAKE) restart logs
+
+clean:
+	rm -rf build out

@@ -1,0 +1,6 @@
+.direnv/
+__pycache__/
+build/
+out/
+# signs the apks: whoever has it can ship an app over every player's game, back it up offline
+keystore.jks
