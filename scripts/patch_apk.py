@@ -1,6 +1,8 @@
 """usage: patch_apk.py <in.apk> <out.apk> <package> [<path in apk>=<file>...], copies an apk under another package
-(the providers named after it follow), named Phigros++ in the launcher, with the files given put in and the store's
-signature left out. the other entries are copied byte for byte, keeping the build fast and reproducible"""
+(the providers named after it follow), named Phigros++ in the launcher with a ++ tab on its icon, with the files given
+put in and the store's signature left out. the other entries are copied byte for byte, keeping the build fast and reproducible"""
+import io
+import re
 import struct
 import sys
 import zipfile
@@ -87,6 +89,36 @@ def resources(data, package):
     return bytes(data)
 
 
+ICON = re.compile(r"res/mipmap-[^/]+/app_icon(_round)?\.png")
+# the installer's tab (patcher/src/Badge.java) in its own units: 60 wide, 40 high, leaning 12, a + at x 23 and 42
+WIDTH, HEIGHT, LEAN, ARM, BAR, PLUSES = 60, 40, 12, 8, 2.5, (23, 42)
+
+
+# about half the icon wide, 3% in from the bottom right corner, over a shadow offset by 2%. drawn 4 times bigger then
+# shrunk, as pillow's polygons have no antialiasing
+def badge(data):
+    from PIL import Image, ImageDraw
+    icon = Image.open(io.BytesIO(data))
+    size, scale = icon.width, 4
+    layer = Image.new("RGBA", (size * scale, size * scale))
+    draw = ImageDraw.Draw(layer)
+    k = 0.52 * size * scale / WIDTH
+    x, y, shadow = 0.97 * size * scale - WIDTH * k, 0.97 * size * scale - HEIGHT * k, 0.02 * size * scale
+
+    def tab(x, y):
+        return [(x + LEAN * k, y), (x + WIDTH * k, y), (x + (WIDTH - LEAN) * k, y + HEIGHT * k), (x, y + HEIGHT * k)]
+    draw.polygon(tab(x + shadow, y + shadow), fill=(0, 0, 0, 128))
+    draw.polygon(tab(x, y), fill=(0xF4, 0xF2, 0xF6, 255))
+    for cx in PLUSES:
+        px, py = x + cx * k, y + HEIGHT / 2 * k
+        draw.rectangle((px - ARM * k, py - BAR * k, px + ARM * k, py + BAR * k), fill=(0x0D, 0x0A, 0x0E, 255))
+        draw.rectangle((px - BAR * k, py - ARM * k, px + BAR * k, py + ARM * k), fill=(0x0D, 0x0A, 0x0E, 255))
+    out = Image.alpha_composite(icon.convert("RGBA"), layer.resize((size, size), Image.LANCZOS)).convert(icon.mode)
+    png = io.BytesIO()
+    out.save(png, "PNG")
+    return png.getvalue()
+
+
 def data_offset(file, info):
     file.seek(info.header_offset + 26)
     name, extra = struct.unpack("<HH", file.read(4))
@@ -138,6 +170,8 @@ def main(src, dst, package, *files):
                 continue
             if info.filename == "AndroidManifest.xml":
                 added(out, central, info.filename, manifest(apk.read(info), package))
+            elif ICON.fullmatch(info.filename):
+                added(out, central, info.filename, badge(apk.read(info)), zipfile.ZIP_STORED)
             elif info.filename == "resources.arsc":
                 added(out, central, info.filename, resources(apk.read(info), package), zipfile.ZIP_STORED)
             else:
