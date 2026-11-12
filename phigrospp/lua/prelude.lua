@@ -411,6 +411,9 @@ function phigrospp.write(path, data)
   assert(os.rename(path .. ".new", path))
 end
 
+-- android makes the app's files/ folder, phigros++/ in it doesn't exist yet on a fresh install
+CS.System.IO.Directory.CreateDirectory(phigrospp.root)
+
 -- a child by path, the error naming what the game no longer has
 function phigrospp.find(root, path)
   return root:Find(path) or error(("%s has no child %s"):format(root.name, path), 2)
