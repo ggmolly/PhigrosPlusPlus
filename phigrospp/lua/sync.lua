@@ -11,7 +11,7 @@ local TAB = "Profile" -- the game's Profile page, under its cloud save login
 local identity, json, ui = phigrospp.identity, phigrospp.json, phigrospp.ui
 
 local sync = setting("Sync to phigros.tools", false, TAB)
-local uploadSave, uploadReplays, uploadPlays, mobileData, details, unlisted -- the player's toggles, made with the tab's rows
+local uploadSave, uploadReplays, uploadPlays, mobileData, unlisted -- the player's toggles, made with the tab's rows
 local chunk = loadfile(PROFILE, "t", {})
 -- { id =, name =, number = (as the server has them), intro = the self-introduction the game last showed, sent = { name =,
 -- intro =, avatar =, background =, unlisted = } as they were when last sent }
@@ -56,13 +56,11 @@ local function saveProfile(p, sent)
     profile.id, profile.name, profile.number, known, table.concat(fields, ", ")))
 end
 
--- the profile as it goes to phigros.tools now: the name and intro as last sent until the game reads them, the details
--- empty when the player keeps them to themselves
+-- the profile as it goes to phigros.tools now: the name and intro as last sent until the game reads them
 local function current()
-  local look, shared = appearance(), details()
+  local look = appearance()
   return { name = name or profile and profile.sent.name, unlisted = unlisted(),
-    intro = shared and (intro or profile and profile.intro) or "",
-    avatar = shared and look.avatar or "", background = shared and look.background or "" }
+    intro = intro or profile and profile.intro or "", avatar = look.avatar, background = look.background }
 end
 
 -- a signed request from inside a coroutine, waiting for its answer
@@ -210,10 +208,9 @@ local function canUpload()
 end
 
 -- the save as the game's cloud save makes it (CloudSaveManager.SaveToFolder: each module read from the game and
--- written encrypted to its own file), sent as the files one after the other. it holds the intro, avatar and
--- background and anyone can download it, so it only goes while the player shares those
+-- written encrypted to its own file), sent as the files one after the other
 local function sendSave()
-  if not uploadSave() or not details() or not canUpload() then return end
+  if not uploadSave() or not canUpload() then return end
   saveChanged = false
   IO.Directory.CreateDirectory(SAVE)
   CS.CloudSaveManager.SaveToFolder(SAVE)
@@ -397,13 +394,12 @@ on("update", function()
     UE.Object.Destroy(share)
   end
 end)
-uploadSave = setting("Upload my save", false, TAB, function() return joined() and details() end)
+uploadSave = setting("Upload my save", true, TAB, joined)
 uploadReplays = setting("Upload replays", true, TAB, joined)
 uploadPlays = setting("Upload play stats", true, TAB, joined)
 -- only on a device with a mobile network, a tablet on wi-fi has nothing to choose
 local cellular = phigrospp.feature("android.hardware.telephony")
 mobileData = setting("Upload over mobile data", true, TAB, function() return joined() and cellular end)
-details = setting("Share my intro, avatar and background", true, TAB, joined)
 unlisted = setting("Unlisted profile", false, TAB, joined)
 
 -- turned on, the save goes right away
