@@ -58,9 +58,13 @@ end
 local function offer()
   prompt = nil
   if game then
-    if ui.confirm({ title = "Phigros++ " .. latest, no = "Skip", yes = "Get the installer",
+    if ui.confirm({ title = "Phigros++ " .. latest, no = "Skip", yes = "Open the installer",
           message = ("This update for Phigros %s is installed with the Phigros++ Installer."):format(game) }) then
-      return CS.UnityEngine.Application.OpenURL(RELEASES .. "/latest")
+      -- the installer that installed this app, else its download on the release page
+      if not phigrospp.launch("sh.molly.phigrosplusplus.installer") then
+        CS.UnityEngine.Application.OpenURL(RELEASES .. "/latest")
+      end
+      return
     end
   elseif ui.confirm({ title = "Phigros++ " .. latest, message = "A new version of Phigros++ is ready to download.",
         yes = "Update", no = "Skip" }) then

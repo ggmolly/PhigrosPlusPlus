@@ -107,6 +107,17 @@ function phigrospp.feature(name)
   return call(packages, "hasSystemFeature", "(Ljava/lang/String;)Z", { jstring(name) }, "Boolean")
 end
 
+-- opens an installed app, false when there's none or android hides it from this one (it shows an app the one that
+-- installed it)
+function phigrospp.launch(package)
+  local packages = call(activity(), "getPackageManager", "()Landroid/content/pm/PackageManager;")
+  local intent = call(packages, "getLaunchIntentForPackage", "(Ljava/lang/String;)Landroid/content/Intent;",
+    { jstring(package) })
+  if intent == 0 then return false end -- a null object
+  call(activity(), "startActivity", "(Landroid/content/Intent;)V", { { l = intent } }, "Void")
+  return true
+end
+
 -- the app's own folder, which no other app can read on any android: for secrets (the phigros.tools key)
 function phigrospp.private()
   local dir = call(activity(), "getFilesDir", "()Ljava/io/File;")
