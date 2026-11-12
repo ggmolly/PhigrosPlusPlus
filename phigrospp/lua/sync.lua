@@ -391,13 +391,6 @@ on("scene", function(scene)
   end)()
 end)
 
--- restoring replaces this device's profile, once the player agrees
-local function replacing()
-  return not profile or ui.confirm({ title = "Replace " .. tag() .. "?", danger = true, yes = "Continue",
-    message = ("This device is %s on phigros.tools. Restoring another profile replaces it here, keep its "
-      .. "recovery phrase to come back to it."):format(tag()) })
-end
-
 -- the key just checked with the server is kept and its profile is this device's, then its uploaded save is offered
 local function restored(body, linked)
   identity.save()
@@ -411,50 +404,40 @@ local function restored(body, linked)
   offering = false
 end
 
--- a profile made on another device, from its 16 words: the key is checked with the server before it's kept, and replaces the
--- one this device had
-local function restore()
-  if not replacing() then return end
-  local ok, typed = ui.confirm({ title = "Restore your phigros.tools profile", yes = "Restore", input = "16 words",
-    message = "Type the 16 words of your recovery phrase, in order, with spaces between them." })
-  if not ok then return end
-  local entropy, problem = identity.fromWords(typed)
-  if not entropy then
-    return ui.confirm({ title = "These aren't your 16 words", message = ("Check the phrase and try again: %s.")
-      :format(problem), yes = "OK", no = false })
-  end
-  local previous = identity.entropy()
-  identity.load(entropy)
-  local status, body = call("POST", "/api/me", "")
-  if status ~= 200 then
-    if previous then identity.load(previous) else identity.forget() end
-    return ui.confirm({ yes = "OK", no = false, title = status == 404 and "No profile has these words"
-      or "Couldn't reach phigros.tools", message = status == 404 and "They are recovery words, but no "
-      .. "phigros.tools profile was made with them. Check each word and their order." or
-      ("Check your connection and try again (%d)."):format(status) })
-  end
-  restored(body, false)
-end
-
--- joining a profile with a code another device shows: this device makes its own key, which the server adds to the
--- profile under the device's model. the code is typed in groups of 4, case and spaces don't matter
+-- a profile made on another device, from the code a signed-in device shows (8 letters and digits: this device joins
+-- with a key of its own, named after its model) or from the profile's 16 words. a refused one changes nothing
 local function signIn()
-  if not replacing() then return end
-  local ok, typed = ui.confirm({ title = "Sign in with a code", yes = "Sign in", input = "XXXX XXXX",
-    message = "On phigros.tools or on a device signed in to your profile, choose Sign in another device and type the "
-      .. "code it shows." })
+  local ok, typed = ui.confirm({ title = "Sign in to my profile", yes = "Sign in", input = "Code or 16 words",
+    message = "Type the code that Sign in another device shows, in Phigros++ or in Devices on phigros.tools, or the 16 "
+      .. "words of your recovery phrase." })
   if not ok then return end
+  local code = #typed:gsub("%W", "") == 8
+  local entropy, problem
+  if not code then
+    entropy, problem = identity.fromWords(typed)
+    if not entropy then
+      return ui.confirm({ title = "These aren't your 16 words", message = ("Check the phrase and try again: %s.")
+        :format(problem), yes = "OK", no = false })
+    end
+  end
   local previous = identity.entropy()
-  identity.create()
-  local status, body = call("PUT", "/api/devices", json.encode({ code = typed,
-    name = UE.SystemInfo.deviceModel }))
+  local status, body
+  if code then
+    identity.create()
+    status, body = call("PUT", "/api/devices", json.encode({ code = typed, name = UE.SystemInfo.deviceModel }))
+  else
+    identity.load(entropy)
+    status, body = call("POST", "/api/me", "")
+  end
   if status ~= 200 then
     if previous then identity.load(previous) else identity.forget() end
-    return ui.confirm({ yes = "OK", no = false, title = status == 404 and "This code doesn't work"
-      or "Couldn't reach phigros.tools", message = status == 404 and "It was already used or is older than 10 "
-      .. "minutes. Ask for a new one." or ("Check your connection and try again (%d)."):format(status) })
+    local wrong = code and { "This code doesn't work", "It was already used or is older than 10 minutes. Ask for a new "
+      .. "one." } or { "No profile has these words", "They are recovery words, but no phigros.tools profile was made "
+      .. "with them. Check each word and their order." }
+    return ui.confirm({ yes = "OK", no = false, title = status == 404 and wrong[1] or "Couldn't reach phigros.tools",
+      message = status == 404 and wrong[2] or ("Check your connection and try again (%d)."):format(status) })
   end
-  restored(body, true)
+  restored(body, code)
 end
 
 -- a code for another device to join this profile: a browser opens it right away, a phone types it
@@ -463,9 +446,9 @@ local function invite()
   if status ~= 200 then return toast(("Couldn't reach phigros.tools (%d)"):format(status)) end
   local code = json.decode(body).code
   if ui.confirm({ title = "Sign in another device", yes = "Open in browser", no = "Done",
-        message = "On phigros.tools, choose Phigros++ profile, or in Phigros++ on another device choose Sign in with "
-          .. "a code, and type this code. It works once, for 10 minutes.",
-        grid = { cells = { code:sub(1, 4), code:sub(5) }, columns = 2 } }) then
+        message = "Type this code on phigros.tools, or in Sign in to my profile on another device. It works once, for 10 "
+          .. "minutes.",
+        grid = { cells = { code:sub(1, 4) .. "  " .. code:sub(5) }, columns = 1 } }) then
     UE.Application.OpenURL(("%s/in#%s"):format(phigrospp.site, code))
   end
 end
@@ -576,5 +559,20 @@ button("Force sync", forceSync, TAB, joined)
 button("Sign in another device", invite, TAB, joined)
 -- a device that joined with a code has its own key, not the profile's: its words wouldn't be the recovery phrase
 button("Show recovery phrase", function() showPhrase(false) end, TAB, function() return joined() and not profile.linked end)
-button("Restore a profile", restore, TAB)
-button("Sign in with a code", signIn, TAB)
+-- leaving forgets the key on this device: a device that joined with a code is removed from the profile too, the
+-- profile's own key comes back only with its words
+local function signOut()
+  if not ui.confirm({ title = "Sign out of " .. tag() .. "?", danger = true, yes = "Sign out",
+        message = profile.linked and "This device stops syncing and leaves your profile. Sign in again with a code "
+          .. "from another device." or "This device stops syncing. Signing in again needs your 16 words, so make "
+          .. "sure you saved them." }) then
+    return
+  end
+  if profile.linked then
+    call("DELETE", "/api/devices", (identity.public():gsub(".", function(c) return ("%02x"):format(c:byte()) end)))
+  end
+  leave()
+  toast("Signed out of phigros.tools")
+end
+button("Sign out", signOut, TAB, joined, true)
+button("Sign in to my profile", signIn, TAB, function() return not profile end)

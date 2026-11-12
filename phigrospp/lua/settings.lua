@@ -74,8 +74,11 @@ function setting(label, default, options, tab, shown)
   end
 end
 
--- a label can be a function, for a button showing something that changes
-function button(label, fn, tab, shown) register(label, tab, { type = "button", fn = fn, shown = shown }) end
+-- a label can be a function, for a button showing something that changes. danger makes its label red, for what can't
+-- be undone
+function button(label, fn, tab, shown, danger)
+  register(label, tab, { type = "button", fn = fn, shown = shown, danger = danger })
+end
 
 -- a label with the game's arrow button, for a row that opens something
 function link(label, fn, tab, shown) register(label, tab, { type = "link", fn = fn, shown = shown }) end
@@ -262,6 +265,7 @@ local function addItem(manager, label)
     return manager:AddSlider(title(label), values[label], min, max, math.type(values[label]) == "integer", {}), true
   end
   local item = manager:AddButton(title(label), {})
+  if kind.danger then item.title.color = phigrospp.ui.danger end
   phigrospp.click(item.button, kind.type == "button" and kind.fn or function()
     cycle(label)
     item:SetTitle(title(label))

@@ -268,9 +268,10 @@ phigrospp.ui = {
   danger = { 0.9, 0.27, 0.33, 1 }, -- the red of buttons that delete
   -- a dialog made from the game's own confirmation popup (the cloud save one): { title =, message =, yes =,
   -- danger = true for a red yes, no = false for yes alone (yes = false for no alone), grid = { cells =, columns = }
-  -- texts in aligned columns under the message, input = a text box's placeholder, its text returned after the choice,
-  -- progress = a function returning how much is done (0 to 1) and the message, a bar redrawn every frame }. called
-  -- from a coroutine (a button's function is one), it waits and returns whether yes was picked
+  -- texts in aligned columns under the message (one column centered), input = a text box's placeholder, its text
+  -- returned after the choice, progress = a function returning how much is done (0 to 1) and the message, a bar
+  -- redrawn every frame }. called from a coroutine (a button's function is one), it waits and returns whether yes was
+  -- picked
   confirm = function(options)
     local waiting, main = coroutine.running()
     assert(not main, "phigrospp.ui.confirm waits for the player: call it from a button's function or a coroutine")
@@ -304,8 +305,9 @@ phigrospp.ui = {
       message.alignment = 0 -- UpperLeft
       for i, cell in ipairs(cells) do
         local column, row = (i - 1) % columns, (i - 1) // columns
+        -- one column has nothing to line up with, so it's centered
         local text = phigrospp.ui.text(subtitle, "phigrospp-dialog-cell", message.font, { column * width, (rows - 1 - row) * ROW },
-          { width, ROW }, 44, 3, { 0, 0 }) -- MiddleLeft
+          { width, ROW }, 44, columns == 1 and 4 or 3, { 0, 0 }) -- MiddleCenter, MiddleLeft
         text.text, text.fontStyle = cell, 1 -- Bold
       end
       height = height + GAP + rows * ROW
