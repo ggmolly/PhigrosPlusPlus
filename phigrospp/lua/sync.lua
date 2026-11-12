@@ -207,15 +207,20 @@ local function canUpload()
   return sync() and profile ~= nil and (mobileData() or UE.Application.internetReachability ~= 1) -- carrier data
 end
 
+local MODULES = { "gameKey", "gameProgress", "gameRecord", "settings", "user" }
+-- while this file exists, a restored profile's save on phigros.tools waits for the player to load it or keep this
+-- device's, and this device's isn't uploaded: a fresh install never replaces it
+local OFFER = phigrospp.root .. "/save-offer"
+
 -- the save as the game's cloud save makes it (CloudSaveManager.SaveToFolder: each module read from the game and
--- written encrypted to its own file), sent as the files one after the other
+-- written encrypted to its own file) and the game's summary of it, sent as the files one after the other
 local function sendSave()
-  if not uploadSave() or not canUpload() then return end
+  if not uploadSave() or IO.File.Exists(OFFER) or not canUpload() then return end
   saveChanged = false
   IO.Directory.CreateDirectory(SAVE)
   CS.CloudSaveManager.SaveToFolder(SAVE)
-  local parts = {}
-  for _, module in ipairs({ "gameKey", "gameProgress", "gameRecord", "settings", "user" }) do
+  local parts = { string.pack("<s1s4", "summary", CS.CloudSaveSummary.FromLocalSave():Serialize()) }
+  for _, module in ipairs(MODULES) do
     parts[#parts + 1] = string.pack("<s1s4", module, phigrospp.read(SAVE .. module))
   end
   phigrospp.signed("PUT", "/api/save", table.concat(parts), function(status, body)
@@ -303,6 +308,65 @@ on("scene", function()
   end)
 end)
 
+local function describe(summary)
+  local cleared = 0
+  for i = 0, #summary.Cleared - 1 do cleared = cleared + summary.Cleared[i] end
+  return ("RKS %.2f, %d charts cleared"):format(summary.RankingScore, cleared)
+end
+
+-- the save the player uploaded from another device, offered once their profile is restored. loading it replaces this
+-- device's, so the player sees what goes before choosing. returns whether it was loaded (the game then closes)
+local function offerSave()
+  local status, body = call("POST", "/api/save", "")
+  if status == 0 or status >= 500 then return false end -- asked again at the next launch
+  if status ~= 200 then
+    IO.File.Delete(OFFER)
+    return false
+  end
+  local files, at = {}, 1
+  while at <= #body do
+    local file, data
+    file, data, at = string.unpack("<s1s4", body, at)
+    files[file] = data
+  end
+  local here = CS.CloudSaveSummary.FromLocalSave()
+  local there = files.summary and CS.CloudSaveSummary.Deserialize(files.summary)
+  local incoming = ("the save you uploaded on %s"):format(os.date("%Y-%m-%d", math.tointeger(tonumber(files.updated)) // 1000))
+    .. (there and (" (%s)"):format(describe(there)) or "")
+  local fresh = here.RankingScore == 0
+  local load = ui.confirm(fresh and {
+    title = "Bring your save over?", yes = "Bring it over", no = "Not now",
+    message = ("phigros.tools has %s. Not now keeps this device's, which then replaces it on phigros.tools.")
+      :format(incoming),
+  } or {
+    title = "Replace the save on this device?", danger = true, yes = "Replace my save", no = "Keep this one",
+    message = ("This device's save (%s) is replaced by %s, records, unlocks and settings included. Keeping this "
+      .. "device's replaces the one on phigros.tools instead."):format(describe(here), incoming),
+  })
+  IO.File.Delete(OFFER)
+  if not load then return false end
+  IO.Directory.CreateDirectory(SAVE)
+  for _, module in ipairs(MODULES) do phigrospp.write(SAVE .. module, files[module]) end
+  CS.CloudSaveManager.LoadFromFolder(SAVE, true, (there or here).SaveVersion)
+  UE.PlayerPrefs.Save()
+  ui.confirm({ title = "Save loaded", message = "Phigros++ closes to finish loading it, open it again.", yes = "OK",
+    no = false })
+  UE.Application.Quit()
+  return true
+end
+
+-- an offer the player didn't answer (the game closed, or phigros.tools was out of reach) comes back on the chapter
+-- screen
+local offering
+on("scene", function(scene)
+  if offering or scene ~= "ChapterSelector" or not sync() or not profile or not IO.File.Exists(OFFER) then return end
+  offering = true
+  coroutine.wrap(function()
+    if not offerSave() then forceSync() end
+    offering = false
+  end)()
+end)
+
 -- a profile made on another device, from its 16 words: the key is checked with the server before it's kept, and replaces the
 -- one this device had
 local function restore()
@@ -334,7 +398,10 @@ local function restore()
   saveProfile(json.decode(body), { name = "", intro = "", avatar = "", background = "", unlisted = false })
   sync(true)
   toast("Welcome back, " .. tag())
-  forceSync()
+  phigrospp.write(OFFER, "")
+  offering = true
+  if not offerSave() then forceSync() end
+  offering = false
 end
 
 -- the tab holds the sync toggle and restoring, and the profile's rows once there's one
