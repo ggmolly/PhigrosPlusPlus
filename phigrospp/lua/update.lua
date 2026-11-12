@@ -10,9 +10,11 @@ local SKIPPED = phigrospp.root .. "/skipped" -- the last version the player skip
 -- screen
 local latest, game, prompt
 
+-- as bundle.c compares them: a beta ("1.2.3-beta.4") comes before its release
 local function number(version)
-  local major, minor, patch = version:match("^(%d+)%.(%d+)%.(%d+)$")
-  return tonumber(major) * 1000000 + tonumber(minor) * 1000 + tonumber(patch)
+  local major, minor, patch, rest = version:match("^(%d+)%.(%d+)%.(%d+)(.*)$")
+  local beta = rest == "" and 999 or tonumber(rest:match("^%-beta%.(%d+)$"))
+  return ((tonumber(major) * 1000 + tonumber(minor)) * 1000 + tonumber(patch)) * 1000 + beta
 end
 
 local function skipped()
@@ -56,8 +58,8 @@ end
 local function offer()
   prompt = nil
   if game then
-    if ui.confirm({ title = "Phigros++ " .. latest, message = ("This update comes as a new app, for Phigros %s."):format(game),
-          yes = "Download", no = "Skip" }) then
+    if ui.confirm({ title = "Phigros++ " .. latest, no = "Skip", yes = "Get the installer",
+          message = ("This update for Phigros %s is installed with the Phigros++ Installer."):format(game) }) then
       return CS.UnityEngine.Application.OpenURL(RELEASES .. "/latest")
     end
   elseif ui.confirm({ title = "Phigros++ " .. latest, message = "A new version of Phigros++ is ready to download.",

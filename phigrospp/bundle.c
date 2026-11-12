@@ -11,11 +11,14 @@
 
 static long running;  // the version of the bundle in use, as a number
 
-// "1.2.3" as 1002003, 0 when it isn't a version
+// "1.2.3" as 1002003999 and "1.2.3-beta.4" as 1002003004, so a beta comes before its release. 0 when it isn't a
+// version
 static long number(const char *version) {
-  unsigned a, b, c;
+  unsigned a, b, c, beta = 999;
   char extra;
-  return sscanf(version, "%u.%u.%u%c", &a, &b, &c, &extra) == 3 ? a * 1000000L + b * 1000L + c : 0;
+  int n = sscanf(version, "%u.%u.%u%c", &a, &b, &c, &extra);
+  if (n == 4 && (sscanf(version, "%u.%u.%u-beta.%u%c", &a, &b, &c, &beta, &extra) != 4 || beta >= 999)) return 0;
+  return n >= 3 ? ((a * 1000L + b) * 1000L + c) * 1000L + beta : 0;
 }
 
 // reads the header line and its version, and unless any is set, why the bundle can't run here (NULL when it can)
