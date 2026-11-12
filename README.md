@@ -17,15 +17,16 @@ It comes with:
 | ![A song with the HUD: the grade and accuracy under the score, the hit error bar at the bottom](assets/hud.webp) | ![The replays of a chart, laid out like the song list](assets/replays.webp) |
 | ![The profile page with the phigros.tools sync options](assets/profile.webp) | ![The Phigros++ settings tab](assets/settings.webp) |
 
-The loader and these built-in mods update from inside the game. A new app is only needed when the game itself updates.
+The loader and these built-in mods update from inside the game. When the game itself updates, the installer patches it
+again.
 
 ## Installing
 
-Download the APKs of the [latest release](https://github.com/ggmolly/PhigrosPlusPlus/releases/latest) and install
-them together, with `adb install-multiple -r *.apk` or an installer for split APKs like SAI. Phigros++ is an app of its
-own, next to Phigros: log in with TapTap and download your cloud save to bring your progress over. Later releases
-install over Phigros++ and keep everything. Each release's APKs can be rebuilt from this repository and checked
-with `make verify`, see the wiki.
+Install Phigros from the Play Store, then download `phigrospp-installer.apk` from the
+[latest release](https://github.com/ggmolly/PhigrosPlusPlus/releases/latest) and open it. The installer patches the
+Phigros on your phone into Phigros++, an app of its own next to the game, so no game files are downloaded. It fetches
+the latest Phigros++, checked against the release key, and updates it later the same way, keeping everything.
+Phigros++ starts with its own save: turn on sync in Settings → Profile to keep it on phigros.tools.
 
 Your own mods go in `Android/data/sh.molly.phigrosplusplus/files/phigros++/mods/`. A mod runs with everything Phigros++
 has, the key of your phigros.tools profile included, so only install mods you trust.

@@ -9,7 +9,7 @@ SPLIT := out/split_config.arm64_v8a.apk
 # every target talks to the same device or files, one at a time
 .NOTPARALLEL:
 
-.PHONY: all lib apk verify install install-full push push-core reset start stop restart logs dev release clean
+.PHONY: all lib apk verify install install-full push push-core reset start stop restart logs dev release publish clean
 
 all: apk
 
@@ -53,9 +53,17 @@ restart: stop start
 logs:
 	adb logcat -s 'phigros++' DEBUG
 
-# the signed bundle and its version line in out/, for a github release (needs PHIGROSPP_SIGNING_KEY)
-release:
+# the signed bundle, its version line, the lib and the installer's manifest in out/ (needs the release key, see
+# scripts/release.sh)
+release: $(LIB)
 	scripts/release.sh
+
+# a github release of phigrospp/VERSION with what release made and the installer (../patcher, built after release)
+publish: release
+	$(MAKE) -C ../patcher
+	gh release create v$$(cat phigrospp/VERSION) out/phigrospp.bundle out/phigrospp.version out/phigrospp.installer \
+		out/libphigrospp.so ../patcher/out/phigrospp-installer.apk --title "Phigros++ $$(cat phigrospp/VERSION)" \
+		--generate-notes --latest
 
 dev: install push
 	adb logcat -c
