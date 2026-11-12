@@ -2,8 +2,8 @@
 -- phigrospp.version is its bundle's first line, the newest game last
 
 local ui = phigrospp.ui
-local RELEASES = "https://github.com/ggmolly/PhigrosPlusPlus/releases"
-local DOWNLOAD = RELEASES .. "/latest/download/"
+local DOWNLOAD = "https://github.com/ggmolly/PhigrosPlusPlus/releases/latest/download/"
+local INSTALLER = "https://github.com/ggmolly/PhigrosPlusPlus-Installer/releases/latest"
 local SKIPPED = phigrospp.root .. "/skipped" -- the last version the player skipped
 
 -- the version offered, the game of its app when it needs a newer app, and whether its popup waits for the chapter
@@ -62,7 +62,7 @@ local function offer()
           message = ("This update for Phigros %s is installed with the Phigros++ Installer."):format(game) }) then
       -- the installer that installed this app, else its download on the release page
       if not phigrospp.launch("sh.molly.phigrosplusplus.installer") then
-        CS.UnityEngine.Application.OpenURL(RELEASES .. "/latest")
+        CS.UnityEngine.Application.OpenURL(INSTALLER)
       end
       return
     end
