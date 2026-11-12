@@ -1,9 +1,10 @@
--- the player's key on phigros.tools: 16 random bytes made when they turn sync on, kept in phigros++/identity once
--- they saved its words. they're hashed into an ed25519 key, and shown as 16 words (one per byte) to bring the key to
--- another device
+-- the player's key on phigros.tools: 16 random bytes made when they turn sync on, kept in the app's private folder
+-- once they saved its words. they're hashed into an ed25519 key, and shown as 16 words (one per byte) to bring the key
+-- to another device
 
 local crypto = phigrospp.crypto
-local PATH = phigrospp.root .. "/identity"
+local PATH = phigrospp.private() .. "/phigros++.identity"
+local SHARED = phigrospp.root .. "/identity" -- where it was kept before, readable by other apps up to android 10
 local SIZE = 16
 local WORDS, BYTE = {}, {} -- a byte's word, and the byte of a word's first 4 letters (unique to it)
 for word in phigrospp.bundle["words.txt"]:gmatch("%l+") do
@@ -26,6 +27,13 @@ end
 local function write(bytes)
   use(bytes)
   phigrospp.write(PATH, bytes)
+end
+
+local shared = io.open(SHARED, "rb")
+if shared then
+  shared:close()
+  phigrospp.write(PATH, phigrospp.read(SHARED))
+  os.remove(SHARED)
 end
 
 local found = io.open(PATH, "rb")

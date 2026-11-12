@@ -107,6 +107,12 @@ function phigrospp.feature(name)
   return call(packages, "hasSystemFeature", "(Ljava/lang/String;)Z", { jstring(name) }, "Boolean")
 end
 
+-- the app's own folder, which no other app can read on any android: for secrets (the phigros.tools key)
+function phigrospp.private()
+  local dir = call(activity(), "getFilesDir", "()Ljava/io/File;")
+  return JNI.GetStringUTFChars(call(dir, "getAbsolutePath", "()Ljava/lang/String;"))
+end
+
 -- a path relative to the file of the mod calling an api function `level` frames up
 function phigrospp.resolve(path, level)
   if path:sub(1, 1) == "/" then return path end
