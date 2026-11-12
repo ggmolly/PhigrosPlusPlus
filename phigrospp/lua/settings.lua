@@ -11,15 +11,15 @@ local LANGUAGES = { "chinese", "chineseTraditional", "english", "japanese", "kor
 local chunk = loadfile(PATH, "t", {})
 local values, tabs, kinds = chunk and chunk() or {}, {}, {}
 
+-- every value, also those of mods not loaded this time, so a disabled or broken mod keeps its settings
 local function save()
+  local labels = {}
+  for label in pairs(values) do labels[#labels + 1] = label end
+  table.sort(labels)
   local lines = { "return {" }
-  for _, tab in ipairs(tabs) do
-    for _, label in ipairs(tabs[tab]) do
-      local value = values[label]
-      if value ~= nil then
-        lines[#lines + 1] = ("  [%q] = %s,"):format(label, type(value) == "string" and ("%q"):format(value) or tostring(value))
-      end
-    end
+  for _, label in ipairs(labels) do
+    local value = values[label]
+    lines[#lines + 1] = ("  [%q] = %s,"):format(label, type(value) == "string" and ("%q"):format(value) or tostring(value))
   end
   lines[#lines + 1] = "}\n"
   phigrospp.write(PATH, table.concat(lines, "\n"))
@@ -52,6 +52,7 @@ local function newTab(name)
 end
 
 local function register(label, tab, kind)
+  if kinds[label] then error(("%q is already a setting or button"):format(label), 3) end
   kinds[label] = kind
   table.insert(newTab(tab or "Phigros++"), label)
 end
