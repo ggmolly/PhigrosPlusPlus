@@ -806,19 +806,28 @@ static int traceback(lua_State *L) {
   return 1;
 }
 
+// frees the hook's slot for the next l_hook
+static void drop_hook(Hook *hook) {
+  count_hook(hook, -1);
+  hook->active = false;
+  luaL_unref(L, LUA_REGISTRYINDEX, hook->before);
+  luaL_unref(L, LUA_REGISTRYINDEX, hook->after);
+  luaL_unref(L, LUA_REGISTRYINDEX, hook->skip);
+}
+
 static void hook_error(Hook *hook) {
   void *method = targets[hook->target].method;
   LOGE("hook %s.%s: %s", il2cpp_class_get_name(il2cpp_method_get_class(method)), il2cpp_method_get_name(method),
        lua_tostring(L, -1));
-  if (++hook->errors >= MAX_ERRORS) {
+  if (hook->active && ++hook->errors >= MAX_ERRORS) {
     LOGE("too many errors, hook disabled");
-    hook->active = false;
-    count_hook(hook, -1);
+    drop_hook(hook);
   }
 }
 
 // called by thunks.S before the original, slot is per-call storage kept until phigrospp_leave:
-// [args table ref, x8, generation]. returns true when a skip hook asked to skip the original
+// [args table ref, x8, generation with the argument count above it]. returns true when a skip hook asked to skip the
+// original
 bool phigrospp_enter(size_t id, uint64_t *x, uint8_t *v, uint64_t *slot) {
   Target *t = &targets[id];
   bool skip = false;
@@ -841,7 +850,7 @@ bool phigrospp_enter(size_t id, uint64_t *x, uint8_t *v, uint64_t *slot) {
       for (int i = n; i >= 1; i--) lua_rawseti(L, -i - 1, i);
       slot[0] = (uint64_t)luaL_ref(L, LUA_REGISTRYINDEX);
       slot[1] = x[8];
-      slot[2] = generation;
+      slot[2] = (uint64_t)n << 32 | generation;
     }
     for (int i = 0; t->befores && i < hook_count; i++) {
       Hook *hook = &hooks[i];
@@ -880,9 +889,10 @@ bool phigrospp_enter(size_t id, uint64_t *x, uint8_t *v, uint64_t *slot) {
 void phigrospp_leave(size_t id, uint64_t *x, uint8_t *v, uint64_t *slot) {
   if (!slot[0]) return;
   pthread_mutex_lock(&lock);
-  if (L && slot[2] == generation) {
+  if (L && (uint32_t)slot[2] == generation) {
     Target *t = &targets[id];
-    int ref = (int)slot[0];
+    // counted in phigrospp_enter: lua_rawlen would stop at a nil argument
+    int ref = (int)slot[0], n = (int)(slot[2] >> 32);
     int top = lua_gettop(L);
     uint8_t tmp[64];
     ensure_attached();
@@ -893,7 +903,6 @@ void phigrospp_leave(size_t id, uint64_t *x, uint8_t *v, uint64_t *slot) {
       if (!hook->active || hook->target != (int)id || hook->after == LUA_NOREF) continue;
       lua_rawgeti(L, LUA_REGISTRYINDEX, hook->after);
       lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
-      int n = (int)lua_rawlen(L, -1);
       for (int j = 1; j <= n; j++) lua_rawgeti(L, handler + 2, j);
       lua_remove(L, handler + 2);
       // an earlier hook may have replaced the result, so it's read again for each one
@@ -928,21 +937,22 @@ static int l_hook(lua_State *L) {
   void *method = check_light(L, 1);
   void *code = *(void **)method;  // MethodInfo.methodPointer
   if (!code) return luaL_error(L, "%s has no code (abstract or generic?)", il2cpp_method_get_name(method));
-  if (hook_count >= MAX_HOOKS) return luaL_error(L, "too many hooks");
+  int id = 0;  // the first free slot, so hooks made and dropped over and over (replays) never run out
+  while (id < hook_count && hooks[id].active) id++;
+  if (id == MAX_HOOKS) return luaL_error(L, "too many hooks");
   int target = target_for(code, method);
   if (target < 0) return luaL_error(L, "couldn't hook %s", il2cpp_method_get_name(method));
   if (!targets[target].method) return luaL_error(L, "%s is used by Phigros++ itself", il2cpp_method_get_name(method));
-  hooks[hook_count] = (Hook){target, true, optional_function(L, 2), optional_function(L, 3), optional_function(L, 4), 0};
-  count_hook(&hooks[hook_count], 1);
-  lua_pushinteger(L, hook_count++);
+  hooks[id] = (Hook){target, true, optional_function(L, 2), optional_function(L, 3), optional_function(L, 4), 0};
+  count_hook(&hooks[id], 1);
+  if (id == hook_count) hook_count++;
+  lua_pushinteger(L, id);
   return 1;
 }
 
 static int l_unhook(lua_State *L) {
   lua_Integer id = luaL_checkinteger(L, 1);
-  if (id < 0 || id >= hook_count || !hooks[id].active) return 0;
-  hooks[id].active = false;
-  count_hook(&hooks[id], -1);
+  if (id >= 0 && id < hook_count && hooks[id].active) drop_hook(&hooks[id]);
   return 0;
 }
 
