@@ -58,12 +58,11 @@ logs:
 release: $(LIB)
 	scripts/release.sh
 
-# a github release of phigrospp/VERSION with what release made and the installer (../patcher, built after release)
+# a github release of phigrospp/VERSION with what release made. the installer has its own releases
+# (github.com/ggmolly/PhigrosPlusPlus-Installer) and patches the game with this one
 publish: release
-	cd ../patcher && nix-shell --run make
 	gh release create v$$(cat phigrospp/VERSION) out/phigrospp.bundle out/phigrospp.version out/phigrospp.installer \
-		out/libphigrospp.so ../patcher/out/phigrospp-installer.apk --title "Phigros++ $$(cat phigrospp/VERSION)" \
-		--generate-notes --latest
+		out/libphigrospp.so --title "Phigros++ $$(cat phigrospp/VERSION)" --generate-notes --latest
 
 dev: install push
 	adb logcat -c
