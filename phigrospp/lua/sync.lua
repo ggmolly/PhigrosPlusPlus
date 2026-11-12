@@ -210,9 +210,10 @@ local function canUpload()
 end
 
 -- the save as the game's cloud save makes it (CloudSaveManager.SaveToFolder: each module read from the game and
--- written encrypted to its own file), sent as the files one after the other
+-- written encrypted to its own file), sent as the files one after the other. it holds the intro, avatar and
+-- background and anyone can download it, so it only goes while the player shares those
 local function sendSave()
-  if not uploadSave() or not canUpload() then return end
+  if not uploadSave() or not details() or not canUpload() then return end
   saveChanged = false
   IO.Directory.CreateDirectory(SAVE)
   CS.CloudSaveManager.SaveToFolder(SAVE)
@@ -230,11 +231,13 @@ end
 
 local function savePlays() phigrospp.write(PLAYS, table.concat(plays, "\n")) end
 
--- the finished songs waiting go together. the ones that came while they were sent stay for the next time
+-- the finished songs waiting go together, as many as the server takes at once, then the next ones
+local MAX_PLAYS = 500
+
 local function sendPlays()
   if #plays == 0 or sendingPlays or not uploadPlays() or not canUpload() then return end
   sendingPlays = true
-  local sent = #plays
+  local sent = math.min(#plays, MAX_PLAYS)
   phigrospp.signed("POST", "/api/plays", table.concat(plays, "\n", 1, sent), function(status, body)
     sendingPlays = false
     if status == 0 or status >= 500 then return print(("sync: %d plays wait, server answered %d"):format(sent, status)) end
@@ -242,6 +245,7 @@ local function sendPlays()
     plays = table.pack(table.unpack(plays, sent + 1))
     plays.n = nil
     savePlays()
+    sendPlays()
   end)
 end
 
@@ -358,8 +362,15 @@ local function placeNumber(label)
   number.transform.anchoredPosition = { chars._items[chars._size - 1].cursorPos.x / ppu + height * 0.08, baseline }
 end
 
+-- the profile's frame, kept from its Start (or found once when mods load while it's open): looking for it every
+-- frame would cost during songs too
+local frame
+hook(CS.StatsFrameController, "Start", { after = function(self) frame = self end })
+on("load", function() frame = UE.Object.FindObjectOfType(CS.StatsFrameController) end)
+
 on("update", function()
-  local stats = joined() and UE.Object.FindObjectOfType(CS.StatsFrameController)
+  if not il2cpp.alive(frame) then frame = nil end
+  local stats = joined() and frame and frame.isActiveAndEnabled and frame
   if stats and not il2cpp.alive(number) then
     local label = stats.playerName.textComponent
     number = ui.text(label.transform, "phigrospp:number", label.font, { 0, 0 }, { 400, 60 }, 1, 6, { 0, 0 }) -- LowerLeft
@@ -371,9 +382,8 @@ on("update", function()
   elseif il2cpp.alive(number) then
     UE.Object.Destroy(number.gameObject)
   end
-  local edit = joined() and not il2cpp.alive(share) and UE.Object.FindObjectOfType(CS.StatsFrameController)
-  if edit then
-    local original = edit.editButton.transform
+  if stats and not il2cpp.alive(share) then
+    local original = stats.editButton.transform
     share = UE.Object.Instantiate(original.gameObject, original.parent, false)
     share.name = "phigrospp:share"
     local t = share.transform
@@ -387,7 +397,7 @@ on("update", function()
     UE.Object.Destroy(share)
   end
 end)
-uploadSave = setting("Upload my save", false, TAB, joined)
+uploadSave = setting("Upload my save", false, TAB, function() return joined() and details() end)
 uploadReplays = setting("Upload replays", true, TAB, joined)
 uploadPlays = setting("Upload play stats", true, TAB, joined)
 -- only on a device with a mobile network, a tablet on wi-fi has nothing to choose

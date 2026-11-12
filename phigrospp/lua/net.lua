@@ -33,6 +33,7 @@ phigrospp.json = {
         local parts, i = {}, last + 2
         while json:sub(i, i) ~= '"' do
           local c = json:sub(i, i)
+          assert(c ~= "", "json: a string never ends") -- a cut answer would loop here forever
           if c ~= "\\" then
             parts[#parts + 1], i = c, i + 1
           elseif json:sub(i + 1, i + 1) == "u" then
