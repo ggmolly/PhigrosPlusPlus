@@ -13,8 +13,9 @@ local identity, json, ui = phigrospp.identity, phigrospp.json, phigrospp.ui
 local sync = setting("Sync to phigros.tools", false, TAB)
 local uploadSave, uploadReplays, uploadPlays, mobileData, unlisted -- the player's toggles, made with the tab's rows
 local chunk = loadfile(PROFILE, "t", {})
--- { id =, name =, number = (as the server has them), intro = the self-introduction the game last showed, sent = { name =,
--- intro =, avatar =, background =, unlisted = } as they were when last sent }
+-- { id =, name =, number = (as the server has them), intro = the self-introduction the game last showed, linked = this
+-- device joined with a code (its key isn't the recovery phrase's), sent = { name =, intro =, avatar =, background =,
+-- unlisted = } as they were when last sent }
 local profile = chunk and chunk()
 local name, intro -- what the game shows, seen each time it reads them
 -- the self-introduction of a player who never wrote one (GameInformation.GetSelfIntro), sent as none
@@ -47,13 +48,15 @@ local function link() return ("%s/players/%s"):format(phigrospp.site, profile.id
 
 local FIELDS = { "name", "intro", "avatar", "background", "unlisted" }
 
-local function saveProfile(p, sent)
+-- linked comes from /api/me (its phrase) or stays as it was
+local function saveProfile(p, sent, linked)
   local known = intro or profile and profile.intro or ""
-  profile = { id = p.id, name = p.name, number = math.tointeger(p.number), intro = known, sent = sent }
+  if linked == nil then linked = profile and profile.linked or false end
+  profile = { id = p.id, name = p.name, number = math.tointeger(p.number), intro = known, linked = linked, sent = sent }
   local fields = {}
   for _, field in ipairs(FIELDS) do fields[#fields + 1] = ("%s = %q"):format(field, sent[field]) end
-  phigrospp.write(PROFILE, ("return { id = %q, name = %q, number = %d, intro = %q, sent = { %s } }\n"):format(
-    profile.id, profile.name, profile.number, known, table.concat(fields, ", ")))
+  phigrospp.write(PROFILE, ("return { id = %q, name = %q, number = %d, intro = %q, linked = %s, sent = { %s } }\n")
+    :format(profile.id, profile.name, profile.number, known, linked, table.concat(fields, ", ")))
 end
 
 -- the profile as it goes to phigros.tools now: the name and intro as last sent until the game reads them
@@ -297,14 +300,29 @@ end)
 
 on("scene", flush)
 
+-- the profile is gone from this device: a device removed on phigros.tools keeps nothing of it
+local function leave()
+  identity.forget()
+  os.remove(PROFILE)
+  profile = nil
+  sync(false)
+end
+
 -- the first scene of a launch tells phigros.tools the player is online, even with nothing to send, and gets back the
--- profile as the server has it (a number changed there shows here)
-local greeted
+-- profile as the server has it (a number changed there shows here), and whether a save sent from the site waits
+local greeted, siteOffer
 on("scene", function()
   if greeted or not sync() or not profile then return end
   greeted = true
   phigrospp.signed("POST", "/api/me", "", function(status, body)
-    if status == 200 then saveProfile(json.decode(body), profile.sent) end
+    if status == 403 and json.decode(body).code == "removed" then
+      leave()
+      return toast("This device was removed from your phigros.tools profile")
+    end
+    if status ~= 200 then return end
+    local me = json.decode(body)
+    saveProfile(me, profile.sent, me.phrase == false)
+    siteOffer = me.offer ~= false
   end)
 end)
 
@@ -314,13 +332,14 @@ local function describe(summary)
   return ("RKS %.2f, %d charts cleared"):format(summary.RankingScore, cleared)
 end
 
--- the save the player uploaded from another device, offered once their profile is restored. loading it replaces this
--- device's, so the player sees what goes before choosing. returns whether it was loaded (the game then closes)
-local function offerSave()
-  local status, body = call("POST", "/api/save", "")
+-- the save the player uploaded from another device, offered once their profile is restored, or (fromSite) the one they
+-- sent from phigros.tools. loading it replaces this device's, so the player sees what goes before choosing. returns
+-- whether it was loaded (the game then closes)
+local function offerSave(fromSite)
+  local status, body = call("POST", fromSite and "/api/offer" or "/api/save", "")
   if status == 0 or status >= 500 then return false end -- asked again at the next launch
   if status ~= 200 then
-    IO.File.Delete(OFFER)
+    if not fromSite then IO.File.Delete(OFFER) end
     return false
   end
   local files, at = {}, 1
@@ -331,19 +350,22 @@ local function offerSave()
   end
   local here = CS.CloudSaveSummary.FromLocalSave()
   local there = files.summary and CS.CloudSaveSummary.Deserialize(files.summary)
-  local incoming = ("the save you uploaded on %s"):format(os.date("%Y-%m-%d", math.tointeger(tonumber(files.updated)) // 1000))
+  local incoming = ("the save you %s on %s"):format(fromSite and "sent from phigros.tools" or "uploaded",
+    os.date("%Y-%m-%d", math.tointeger(tonumber(files.updated)) // 1000))
     .. (there and (" (%s)"):format(describe(there)) or "")
+  -- declining the save of the profile lets this device's replace it there, declining one sent from the site drops it
+  local declined = fromSite and "Keeping this device's drops it." or "Keeping this device's replaces the one on "
+    .. "phigros.tools instead."
   local fresh = here.RankingScore == 0
   local load = ui.confirm(fresh and {
-    title = "Bring your save over?", yes = "Bring it over", no = "Not now",
-    message = ("phigros.tools has %s. Not now keeps this device's, which then replaces it on phigros.tools.")
-      :format(incoming),
+    title = "Bring your save over?", yes = "Bring it over", no = fromSite and "No" or "Not now",
+    message = ("phigros.tools has %s. %s"):format(incoming, declined),
   } or {
     title = "Replace the save on this device?", danger = true, yes = "Replace my save", no = "Keep this one",
-    message = ("This device's save (%s) is replaced by %s, records, unlocks and settings included. Keeping this "
-      .. "device's replaces the one on phigros.tools instead."):format(describe(here), incoming),
+    message = ("This device's save (%s) is replaced by %s, records, unlocks and settings included. %s")
+      :format(describe(here), incoming, declined),
   })
-  IO.File.Delete(OFFER)
+  if fromSite then call("DELETE", "/api/offer", "") else IO.File.Delete(OFFER) end
   if not load then return false end
   IO.Directory.CreateDirectory(SAVE)
   for _, module in ipairs(MODULES) do phigrospp.write(SAVE .. module, files[module]) end
@@ -359,22 +381,40 @@ end
 -- screen
 local offering
 on("scene", function(scene)
-  if offering or scene ~= "ChapterSelector" or not sync() or not profile or not IO.File.Exists(OFFER) then return end
-  offering = true
+  if offering or scene ~= "ChapterSelector" or not sync() or not profile then return end
+  local restored = IO.File.Exists(OFFER)
+  if not restored and not siteOffer then return end
+  offering, siteOffer = true, false
   coroutine.wrap(function()
-    if not offerSave() then forceSync() end
+    if not offerSave(not restored) and restored then forceSync() end
     offering = false
   end)()
 end)
 
+-- restoring replaces this device's profile, once the player agrees
+local function replacing()
+  return not profile or ui.confirm({ title = "Replace " .. tag() .. "?", danger = true, yes = "Continue",
+    message = ("This device is %s on phigros.tools. Restoring another profile replaces it here, keep its "
+      .. "recovery phrase to come back to it."):format(tag()) })
+end
+
+-- the key just checked with the server is kept and its profile is this device's, then its uploaded save is offered
+local function restored(body, linked)
+  identity.save()
+  -- nothing counts as sent, so this device's profile goes to phigros.tools as the game shows it
+  saveProfile(json.decode(body), { name = "", intro = "", avatar = "", background = "", unlisted = false }, linked)
+  sync(true)
+  toast("Welcome back, " .. tag())
+  phigrospp.write(OFFER, "")
+  offering = true
+  if not offerSave() then forceSync() end
+  offering = false
+end
+
 -- a profile made on another device, from its 16 words: the key is checked with the server before it's kept, and replaces the
 -- one this device had
 local function restore()
-  if profile and not ui.confirm({ title = "Replace " .. tag() .. "?", danger = true, yes = "Continue",
-        message = ("This device is %s on phigros.tools. Restoring another profile replaces it here, keep its "
-          .. "recovery phrase to come back to it."):format(tag()) }) then
-    return
-  end
+  if not replacing() then return end
   local ok, typed = ui.confirm({ title = "Restore your phigros.tools profile", yes = "Restore", input = "16 words",
     message = "Type the 16 words of your recovery phrase, in order, with spaces between them." })
   if not ok then return end
@@ -393,15 +433,41 @@ local function restore()
       .. "phigros.tools profile was made with them. Check each word and their order." or
       ("Check your connection and try again (%d)."):format(status) })
   end
-  identity.save()
-  -- nothing counts as sent, so this device's profile goes to phigros.tools as the game shows it
-  saveProfile(json.decode(body), { name = "", intro = "", avatar = "", background = "", unlisted = false })
-  sync(true)
-  toast("Welcome back, " .. tag())
-  phigrospp.write(OFFER, "")
-  offering = true
-  if not offerSave() then forceSync() end
-  offering = false
+  restored(body, false)
+end
+
+-- joining a profile with a code another device shows: this device makes its own key, which the server adds to the
+-- profile under the device's model. the code is typed in groups of 4, case and spaces don't matter
+local function signIn()
+  if not replacing() then return end
+  local ok, typed = ui.confirm({ title = "Sign in with a code", yes = "Sign in", input = "XXXX XXXX",
+    message = "On phigros.tools or on a device signed in to your profile, choose Sign in another device and type the "
+      .. "code it shows." })
+  if not ok then return end
+  local previous = identity.entropy()
+  identity.create()
+  local status, body = call("PUT", "/api/devices", json.encode({ code = typed,
+    name = UE.SystemInfo.deviceModel }))
+  if status ~= 200 then
+    if previous then identity.load(previous) else identity.forget() end
+    return ui.confirm({ yes = "OK", no = false, title = status == 404 and "This code doesn't work"
+      or "Couldn't reach phigros.tools", message = status == 404 and "It was already used or is older than 10 "
+      .. "minutes. Ask for a new one." or ("Check your connection and try again (%d)."):format(status) })
+  end
+  restored(body, true)
+end
+
+-- a code for another device to join this profile: a browser opens it right away, a phone types it
+local function invite()
+  local status, body = call("POST", "/api/invite", "")
+  if status ~= 200 then return toast(("Couldn't reach phigros.tools (%d)"):format(status)) end
+  local code = json.decode(body).code
+  if ui.confirm({ title = "Sign in another device", yes = "Open in browser", no = "Done",
+        message = "On phigros.tools, choose Phigros++ profile, or in Phigros++ on another device choose Sign in with "
+          .. "a code, and type this code. It works once, for 10 minutes.",
+        grid = { cells = { code:sub(1, 4), code:sub(5) }, columns = 2 } }) then
+    UE.Application.OpenURL(("%s/in#%s"):format(phigrospp.site, code))
+  end
 end
 
 -- the tab holds the sync toggle and restoring, and the profile's rows once there's one
@@ -507,5 +573,8 @@ function forceSync()
 end
 
 button("Force sync", forceSync, TAB, joined)
-button("Show recovery phrase", function() showPhrase(false) end, TAB, joined)
+button("Sign in another device", invite, TAB, joined)
+-- a device that joined with a code has its own key, not the profile's: its words wouldn't be the recovery phrase
+button("Show recovery phrase", function() showPhrase(false) end, TAB, function() return joined() and not profile.linked end)
 button("Restore a profile", restore, TAB)
+button("Sign in with a code", signIn, TAB)
