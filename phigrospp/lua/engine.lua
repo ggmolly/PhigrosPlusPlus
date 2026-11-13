@@ -118,6 +118,22 @@ function phigrospp.launch(package)
   return true
 end
 
+-- asks android to run the screen at hz while nothing touches it (0 lets it choose again), through unity's surface
+function phigrospp.frameRate(hz)
+  local SurfaceView, ViewGroup = JNI.FindClass("android/view/SurfaceView"), JNI.FindClass("android/view/ViewGroup")
+  local function find(view)
+    if JNI.IsInstanceOf(view, SurfaceView) then return view end
+    if not JNI.IsInstanceOf(view, ViewGroup) then return nil end
+    for i = 0, call(view, "getChildCount", "()I", nil, "Int") - 1 do
+      local found = find(call(view, "getChildAt", "(I)Landroid/view/View;", { { i = i } }))
+      if found then return found end
+    end
+  end
+  local view = find(call(call(activity(), "getWindow", "()Landroid/view/Window;"), "getDecorView", "()Landroid/view/View;"))
+  local surface = call(call(view, "getHolder", "()Landroid/view/SurfaceHolder;"), "getSurface", "()Landroid/view/Surface;")
+  call(surface, "setFrameRate", "(FI)V", { { f = hz }, { i = 0 } }, "Void") -- FRAME_RATE_COMPATIBILITY_DEFAULT
+end
+
 -- the app's own folder, which no other app can read on any android: for secrets (the phigros.tools key)
 function phigrospp.private()
   local dir = call(activity(), "getFilesDir", "()Ljava/io/File;")
@@ -210,6 +226,7 @@ end
 
 local FORWARD = union(polygon({ { -38, -28 }, { 2, 0 }, { -38, 28 } }), polygon({ { 2, -28 }, { 42, 0 }, { 2, 28 } }))
 local ARROW = union(polygon({ { -40, 0 }, { -6, -34 }, { -6, 34 } }), box(14, 0, 26, 5)) -- pointing left
+local SQUARE = function(x, y) return math.abs(box(0, 0, 30, 30)(x, y)) - 4 end -- an outline
 -- 96 pixel icons, as signed distances (see phigrospp.sprite)
 local ICONS = {
   play = polygon({ { -26, -36 }, { 36, 0 }, { -26, 36 } }),
@@ -221,6 +238,8 @@ local ICONS = {
   cross = union(stroke(-32, -32, 32, 32, 10), stroke(-32, 32, 32, -32, 10)),
   bin = union(box(0, 30, 34, 4), box(0, 37, 10, 4), polygon({ { -20, -38 }, { 20, -38 }, { 26, 22 }, { -26, 22 } })),
   down = union(polygon({ { -24, -8 }, { 24, -8 }, { 0, -38 } }), box(0, 14, 5, 24)), -- an arrow pointing down
+  unchecked = SQUARE,
+  checked = union(SQUARE, stroke(-15, 2, -3, -11, 8), stroke(-6, -11, 16, 13, 8)),
 }
 ICONS.up = flip(ICONS.down)
 local icons = {}

@@ -7,8 +7,48 @@ local pending = {}
 
 phigrospp.site = HOST
 
--- flat json objects of strings, numbers and booleans, as the server sends and takes them
+-- json as the server sends it (null is nil), and flat objects of strings, numbers and booleans as it takes them
 local ESCAPES = { b = "\b", f = "\f", n = "\n", r = "\r", t = "\t" }
+
+-- the value starting at or after at, and where it ends
+local function parse(json, at)
+  at = assert(json:find("%S", at), "json: the answer ends early")
+  local c = json:sub(at, at)
+  if c == '"' then
+    local parts, i = {}, at + 1
+    while json:sub(i, i) ~= '"' do
+      local ch = json:sub(i, i)
+      assert(ch ~= "", "json: a string never ends") -- a cut answer would loop here forever
+      if ch ~= "\\" then
+        parts[#parts + 1], i = ch, i + 1
+      elseif json:sub(i + 1, i + 1) == "u" then
+        parts[#parts + 1], i = utf8.char(tonumber(json:sub(i + 2, i + 5), 16)), i + 6
+      else
+        parts[#parts + 1], i = ESCAPES[json:sub(i + 1, i + 1)] or json:sub(i + 1, i + 1), i + 2
+      end
+    end
+    return table.concat(parts), i + 1
+  end
+  if c ~= "{" and c ~= "[" then
+    local word, after = json:match("^([^,}%]%s]+)()", at)
+    if word == "null" then return nil, after end
+    return tonumber(word) or word == "true", after
+  end
+  local out, close, n = {}, c == "{" and "}" or "]", 0
+  if json:match("^%s*(.)", at + 1) == close then return out, json:find(close, at + 1, true) + 1 end
+  repeat
+    local key
+    n = n + 1
+    if close == "}" then
+      key, at = parse(json, at + 1)
+      at = json:find(":", at, true)
+    end
+    out[key or n], at = parse(json, at + 1)
+    at = json:find("%S", at)
+  until json:sub(at, at) ~= ","
+  assert(json:sub(at, at) == close, "json: a list never ends")
+  return out, at + 1
+end
 
 phigrospp.json = {
   encode = function(object)
@@ -20,32 +60,7 @@ phigrospp.json = {
     end
     return "{" .. table.concat(fields, ",") .. "}"
   end,
-  decode = function(json)
-    local object, at = {}, 1
-    while true do
-      local _, last, key = json:find('"([^"]+)"%s*:%s*', at)
-      if not key then return object end
-      if json:sub(last + 1, last + 1) ~= '"' then
-        local value
-        value, at = json:match("^([^,}%s]+)()", last + 1)
-        object[key] = tonumber(value) or value == "true"
-      else
-        local parts, i = {}, last + 2
-        while json:sub(i, i) ~= '"' do
-          local c = json:sub(i, i)
-          assert(c ~= "", "json: a string never ends") -- a cut answer would loop here forever
-          if c ~= "\\" then
-            parts[#parts + 1], i = c, i + 1
-          elseif json:sub(i + 1, i + 1) == "u" then
-            parts[#parts + 1], i = utf8.char(tonumber(json:sub(i + 2, i + 5), 16)), i + 6
-          else
-            parts[#parts + 1], i = ESCAPES[json:sub(i + 1, i + 1)] or json:sub(i + 1, i + 1), i + 2
-          end
-        end
-        object[key], at = table.concat(parts), i + 1
-      end
-    end
-  end,
+  decode = function(json) return (parse(json, 1)) end,
 }
 
 -- done(status, body) runs on the main thread, status is 0 when the server couldn't be reached. returns the

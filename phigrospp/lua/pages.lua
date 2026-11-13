@@ -141,6 +141,15 @@ function Page:close()
   selector.enabled = true
 end
 
+-- gone at once, the song list back as it was: for a song started from the page, the game's transition plays from there
+function Page:remove()
+  slide(self, 0)
+  UE.Object.Destroy(self.content.go)
+  UE.Object.Destroy(self.buttons.go)
+  selector.enabled = true
+  page = nil
+end
+
 local function placeRows(p)
   local l = p.listed
   for _, r in ipairs(l.rows) do
@@ -254,12 +263,7 @@ on("update", function()
     slide(page, page.closing and 1 - f or f)
     page.open = f == 1
   end
-  if page.closing and f == 1 then
-    UE.Object.Destroy(page.content.go)
-    UE.Object.Destroy(page.buttons.go)
-    page = nil
-    return
-  end
+  if page.closing and f == 1 then return page:remove() end
   if page.listed and not page.closing then touchList(page, dt) end
 end)
 

@@ -322,7 +322,7 @@ on("scene", function()
     if status ~= 200 then return end
     local me = json.decode(body)
     saveProfile(me, profile.sent, me.phrase == false)
-    siteOffer = me.offer ~= false
+    siteOffer = me.offer ~= nil
   end)
 end)
 

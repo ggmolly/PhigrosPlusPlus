@@ -5,15 +5,22 @@
 local UE = CS.UnityEngine
 local Input, Time, Screen, IO = UE.Input, UE.Time, UE.Screen, CS.System.IO
 local DIR = phigrospp.root .. "/replays"
+local ONLINE = phigrospp.root .. "/online" -- other players' replays downloaded to be watched, until the next load
+local SIGNED = 96 -- phigros.tools keeps a replay with its player's key and signature after it
 local file = phigrospp.replayfile
 local SEEK_SPEED = 32 -- recorded frames per screen frame while seeking
+local JUDGE_SPEED = 256 -- and while judging a replay before it plays
+
+if IO.Directory.Exists(ONLINE) then IO.Directory.Delete(ONLINE, true) end
 
 local record = setting("Record replays", true)
 
 local level, mode
 local armed, watchNext, resume -- the replay the next song start watches, and where a rewind's restart goes
+local whose -- the name#number of the player of the replay started from the song list
+local judged = {} -- the replays (by path) played through once since the game started, see on("song")
 local recorded, events, kept -- recording, and the play just kept until its result screen compares it with the record
-local playback, serving, hooks, simulating, enabled, quit, leave -- watching
+local playback, serving, hooks, simulating, enabled, cross, quit, leave -- watching
 
 local function folder(id, difficulty) return ("%s/%s.%s"):format(DIR, id, difficulty) end
 
@@ -29,10 +36,10 @@ local function readTouches()
   return list
 end
 
--- the touches of this frame, replayed ones while watching (none while the game pauses the replay)
+-- the touches of this frame, replayed ones while watching (none while the game pauses the replay or judges it first)
 function touches()
   if not serving then return readTouches() end
-  return level.progressControl.isPlaying and serving.touches or {}
+  return level.progressControl.isPlaying and not playback.judging and serving.touches or {}
 end
 
 function replaying() return serving ~= nil end
@@ -44,6 +51,12 @@ local function getprop(name)
   local value = p:read("l")
   p:close()
   return value
+end
+
+-- the screen's refresh rate (Hz)
+local function refresh()
+  local rate = Screen.currentResolution.m_RefreshRate
+  return rate.numerator / rate.denominator
 end
 
 -- what every replay was played with, read once: see replayfile.lua's header
@@ -64,10 +77,9 @@ local function played()
     end
   end
   table.sort(files)
-  local refresh = Screen.currentResolution.m_RefreshRate
   environment = { game = CS.CloudSaveSummary.FromLocalSave().GameVersion, phigrospp = phigrospp.version,
     device = UE.SystemInfo.deviceModel, android = getprop("ro.build.version.release"),
-    refresh = refresh.numerator / refresh.denominator, fps = UE.Application.targetFrameRate,
+    refresh = refresh(), fps = UE.Application.targetFrameRate,
     files = table.concat(files, ","), dpi = Screen.dpi }
   return environment
 end
@@ -104,6 +116,60 @@ local function serve()
   }
 end
 
+-- the header of the replay a song plays or is about to play
+local loaded
+local function watchedHeader()
+  local path = watchNext or playback and playback.path
+  if not path then return nil end
+  if not loaded or loaded.path ~= path then loaded = { path = path, header = file.header(phigrospp.read(path)) } end
+  return loaded.header
+end
+
+-- while the game lays a replay's chart out, it gets the screen the replay was played on: lines, note sizes and the
+-- flick speed come from Screen's size and dpi, the notes' spread from the size GameInformation kept at launch, which
+-- LevelControl's start reads (the rest of that start needs the real Screen)
+local laying, layout = 0, nil
+for method, field in pairs({ get_width = "width", get_height = "height", get_dpi = "dpi" }) do
+  hook(Screen, method, { after = function() if layout then return layout[field] end end })
+end
+for _, m in ipairs({ { CS.JudgeLineControl, "Start" }, { CS.JudgeLineControl, "CreateNote" }, { CS.FingerManagement, "Start" } }) do
+  hook(m[1], m[2], {
+    before = function() laying, layout = laying + 1, watchedHeader() end,
+    after = function()
+      laying = laying - 1
+      if laying == 0 then layout = nil end
+    end,
+  })
+end
+
+local real
+hook(il2cpp.find("%f[%w]LevelControl%.<Start>")[1], "MoveNext", {
+  before = function()
+    local h, info = watchedHeader(), CS.GameInformation.main
+    if not h then return end
+    real = { info.screenW, info.screenH }
+    info.screenW, info.screenH = h.width, h.height
+  end,
+  after = function()
+    if not real then return end
+    local info = CS.GameInformation.main
+    info.screenW, info.screenH, real = real[1], real[2], nil
+  end,
+})
+
+-- touches of another screen moved to where they meet the same world point through this screen's camera, which shows
+-- 5 units up and down from the middle and as much across as its aspect allows
+local function moveTouches(h, frames)
+  local width, height = Screen.width, Screen.height
+  if h.width == width and h.height == height then return end
+  local k = h.width / h.height / (width / height)
+  for _, frame in ipairs(frames) do
+    for _, t in ipairs(frame.touches) do
+      t.x, t.y = ((t.x / h.width * 2 - 1) * k + 1) / 2 * width, t.y / h.height * height
+    end
+  end
+end
+
 -- the fingers of a frame kept still, for a moment the replay waits through
 local function still(frame)
   local list = {}
@@ -120,6 +186,7 @@ local function quitButton()
   local canvas = icon:GetComponentInParent(il2cpp.typeof(UE.Canvas), true)
   local camera = canvas.renderMode ~= 0 and canvas.worldCamera or nil -- ScreenSpaceOverlay has none
   local reach = 100 * Screen.height / 1080
+  cross = icon:GetComponent(UE.RectTransform)
   quit = function(position)
     local at = UE.RectTransformUtility.WorldToScreenPoint(camera, icon.position)
     return math.abs(position.x - at.x) < reach and math.abs(position.y - at.y) < reach
@@ -174,12 +241,21 @@ end
 -- what the coming screen frame plays: k recorded frames, the first by the game's own update and the others simulated
 -- at its end. JudgeControl only judges once the music plays, which happens on its own clock, so until then k is 1
 local function plan(p)
-  p.credit = p.credit + (p.target and SEEK_SPEED or p.paused and 0 or p.speed)
+  -- one recorded frame per screen frame when the screen runs at the recorded rate (see on("song")), more when it
+  -- can't go that fast
+  local rate = math.floor(refresh() + 0.5)
+  p.credit = p.credit + (p.judging and JUDGE_SPEED or p.target and SEEK_SPEED or p.paused and 0 or p.speed * math.floor(p.header.refresh + 0.5) / rate)
   local k = math.min(math.floor(p.credit), #p.frames - p.cursor, p.target and p.target - p.cursor or math.huge)
   p.credit = p.credit - math.floor(p.credit)
   if level.progressControl.audioSource.CurrentStatus ~= 0 then k = math.min(k, 1) end
   p.live, p.extra = k > 0, math.max(k - 1, 0)
   setJudging(p.live)
+end
+
+-- the song again from its start, then played fast up to target
+local function reload(p, target)
+  resume, watchNext = { target = target, speed = p.speed, paused = p.paused }, p.path
+  UE.SceneManagement.SceneManager.LoadScene("Level")
 end
 
 -- the replays of a chart and control of the one being watched, for the picker and the player on screen
@@ -195,26 +271,21 @@ phigrospp.replay = {
     end
     return list
   end,
-  has = function(id, difficulty)
-    local dir = folder(id, difficulty)
-    if not IO.Directory.Exists(dir) then return false end
-    local paths = IO.Directory.GetFiles(dir, "*")
-    for i = 0, #paths - 1 do
-      local handle = assert(io.open(paths[i], "rb"))
-      local start = handle:read(7)
-      handle:close()
-      if file.current(start) then return true end
-    end
-    return false
+  -- done(path) once a replay of phigros.tools is on the device, done(nil, why) when it can't be watched
+  download = function(sha256, done)
+    local path = ("%s/%s.pigeon"):format(ONLINE, sha256)
+    if IO.File.Exists(path) then return done(path) end
+    phigrospp.request("GET", "/api/replays/" .. sha256, nil, function(status, body)
+      if status ~= 200 then return done(nil, "phigros.tools can't be reached") end
+      if not file.current(body) then return done(nil, "This replay is from another version of Phigros++") end
+      IO.Directory.CreateDirectory(ONLINE)
+      phigrospp.write(path, body:sub(1, -SIGNED - 1))
+      done(path)
+    end)
   end,
-  -- starts the selected chart in the song list as that replay, if it was recorded on a screen this size: touches are
-  -- in pixels, on another screen the song would play for real
-  watch = function(path)
-    local h = file.header(phigrospp.read(path))
-    if h.width ~= Screen.width or h.height ~= Screen.height then
-      return toast(("This replay was played on a %dx%d screen"):format(h.width, h.height))
-    end
-    armed = path
+  -- starts the selected chart in the song list as that replay of player (name#number, nil when unknown)
+  watch = function(path, player)
+    armed, whose = path, player
     local selector = UE.Object.FindObjectOfType(CS.SongSelector)
     selector.enabled = true -- a page over the song list turns it off
     selector:NormalStart()
@@ -224,6 +295,8 @@ phigrospp.replay = {
     phigrospp.emit("replays")
   end,
   state = function() return playback end,
+  -- the cross quitting the replay, in the game's UI
+  cross = function() return cross end,
   -- the game paused the song (its pause menu is open)
   halted = function() return not live() end,
   pause = function(paused)
@@ -242,8 +315,7 @@ phigrospp.replay = {
       p.target = frame
       return music(p)
     end
-    resume, watchNext = { target = frame, speed = p.speed, paused = p.paused }, p.path
-    UE.SceneManagement.SceneManager.LoadScene("Level")
+    reload(p, frame)
   end,
 }
 
@@ -273,6 +345,11 @@ local function protect()
   end
 end
 
+-- the player of the replay watched or whose result shows (false when unknown), nil when none is
+function phigrospp.replay.by()
+  if blockers then return whose or false end
+end
+
 local function unprotect()
   for _, id in ipairs(blockers or {}) do unhook(id) end
   blockers = nil
@@ -284,12 +361,21 @@ on("song", function()
   watchNext = nil
   if path then
     local header, frames = file.decode(phigrospp.read(path))
+    moveTouches(header, frames)
+    phigrospp.frameRate(header.refresh)
     protect()
     quitButton()
     local r = resume or {}
     mode, resume = "watch", nil
     playback = { path = path, header = header, frames = frames, cursor = 0, credit = 0, live = true, extra = 0,
       speed = r.speed or 1, paused = r.paused or false, target = r.target }
+    -- the first time, it's played through fast and silently, so the seek bar marks every good, bad and miss before it
+    -- plays again from its start
+    if not judged[path] then
+      playback.judging, playback.target = true, #frames - 1
+      local cameras = UE.Camera.allCameras -- nothing of it is drawn, the reload brings them back
+      for i = 0, #cameras - 1 do cameras[i].enabled = false end
+    end
     print(("replay: watching %s, %d frames"):format(path, #frames))
   else
     unprotect()
@@ -325,6 +411,10 @@ on("update", function()
   if p.live then p.cursor = p.cursor + 1 end
   if not hooks then serve() end
   if p.extra > 0 then simulate(p, p.extra) end
+  if p.judging and p.cursor >= p.target then
+    judged[p.path] = true
+    return reload(p)
+  end
   if p.target and p.cursor >= p.target then
     p.target = nil
     music(p)
@@ -409,7 +499,10 @@ end)
 
 -- a replay restarted from the game's pause menu is watched again, the song list forgets it
 on("leave", function()
-  if mode == "watch" then watchNext = watchNext or playback.path end
+  if mode == "watch" then
+    watchNext = watchNext or playback.path
+    phigrospp.frameRate(0)
+  end
   unserve()
   mode = nil
 end)

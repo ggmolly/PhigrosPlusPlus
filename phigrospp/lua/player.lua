@@ -13,6 +13,10 @@ local rect, icon = kit.rect, kit.icon
 
 local ui -- the player of the current song, rebuilt with each song scene
 local shownUntil, dragging = 0, nil
+-- the goods (blue, like in the game), bads and misses of each replay watched, by path: { frame, good } marked on the
+-- seek bar where they happened. they fill in as the replay plays or seeks, and stay for the next time
+local MARK = { [true] = { 0.63, 0.88, 1, 1 }, [false] = { 1, 0.36, 0.36, 1 } }
+local marks = {}
 
 local function frameAt(t)
   local frames = replay.state().frames
@@ -33,14 +37,21 @@ end
 -- a screen space canvas over the song, under the taps
 local function overlay(name) return kit.overlay(name, 32766) end
 
--- the "Replay" mark stays, the controls fade in and out
+-- "Replay", with whose it is when known
+local function title()
+  local by = replay.by()
+  return by and ("Replay (%s)"):format(by) or "Replay"
+end
+
+-- the "Replay" mark stays right of the cross (in the game's UI, it moves with it), the controls fade in and out
 local function build()
-  local u, width, height = Screen.height / 1080, Screen.width, Screen.height
-  local mark = overlay("phigrospp-replay")
-  label(mark.transform, "phigrospp-replay-text", { 110 * u, height - 64 * u }, { 300 * u, 60 * u }, 40 * u, 3,
-    { 0, 0.5 }).text = "Replay" -- MiddleLeft
+  local u, width = Screen.height / 1080, Screen.width
+  local cross = replay.cross()
+  local mark = label(cross, "phigrospp-replay-text", { cross.rect.m_Width + 24, cross.rect.m_Height / 2 }, { 0, 0 }, 40, 3,
+    { 0, 0.5 }) -- MiddleLeft
+  mark.text = title()
   local go = overlay("phigrospp-player")
-  local p = { group = go:AddComponent(UE.CanvasGroup), go = go, mark = mark, buttons = {} }
+  local p = { group = go:AddComponent(UE.CanvasGroup), go = go, mark = mark.gameObject, buttons = {} }
   p.group.alpha = 0
   local parent = go.transform
 
@@ -52,6 +63,11 @@ local function build()
   p.bar = { x = (width - barWidth) / 2, y = barY, width = barWidth, reach = 50 * u }
   rect(parent, "phigrospp-seek", { p.bar.x, barY }, { barWidth, 8 * u }, { 1, 1, 1, 0.3 })
   p.fill = rect(parent, "phigrospp-seek-fill", { p.bar.x, barY }, { 0, 8 * u }, { 1, 1, 1, 0.9 })
+  p.addMark = function(m)
+    local x = p.bar.x + p.bar.width * m.frame / #replay.state().frames
+    rect(parent, "phigrospp-seek-mark", { x - u, barY }, { 2 * u, 24 * u }, MARK[m.good])
+  end
+  for _, m in ipairs(marks[replay.state().path] or {}) do p.addMark(m) end
 
   local size, gap, rowY = 72 * u, 150 * u, 120 * u
   local names = { "restart", "back", "play", "forward", "speed" }
@@ -119,8 +135,30 @@ local function handle(touch)
   shownUntil = 0
 end
 
+-- while the replay is judged before it plays (see replay.lua), the song's background covers it, dimmed. the game
+-- loads that background in the meantime, the cover stays dark until then
+local cover, art, painted
+local function judging()
+  local width, height, u = Screen.width, Screen.height, Screen.height / 1080
+  if not il2cpp.alive(cover) then
+    cover, painted = overlay("phigrospp-judging"), false
+    art = rect(cover.transform, "phigrospp-judging-background", { width / 2, height / 2 }, { width, height },
+      { 0.08, 0.08, 0.08, 1 }, { 0.5, 0.5 })
+    label(cover.transform, "phigrospp-judging-text", { width / 2, height / 2 }, { 0, 0 }, 56 * u, 4,
+      { 0.5, 0.5 }).text = "Preparing..." -- MiddleCenter
+  end
+  if painted then return end
+  local sprite = UE.Object.FindObjectOfType(CS.LevelControl).background:GetComponent(UE.SpriteRenderer).sprite
+  if not sprite then return end
+  local size = sprite.rect
+  local scale = math.max(width / size.m_Width, height / size.m_Height) -- fills the screen, cropped like the game's
+  art.sprite, art.color, painted = sprite, { 0.4, 0.4, 0.4, 1 }, true
+  art.transform.sizeDelta = { size.m_Width * scale, size.m_Height * scale }
+end
+
 on("update", function()
   local state = replay.state()
+  if state and state.judging then return judging() end
   if not state or state.ended then
     if ui and il2cpp.alive(ui.go) then
       ui.go:SetActive(false)
@@ -149,4 +187,27 @@ on("update", function()
     ui.speed = state.speed
     ui.buttons[5].text.text = ("%g×"):format(state.speed)
   end
+end)
+
+-- the result screen of a replay says it's one, right of its retry button
+on("scene", function(name)
+  if name ~= "LevelOver" or replay.by() == nil then return end
+  local over = UE.Object.FindObjectOfType(CS.LevelOverControl)
+  local retry = over.retryButton:GetComponent(UE.RectTransform)
+  kit.text(retry, "phigrospp-replay-text", over.songsName.font, { retry.rect.m_Width + 24, retry.rect.m_Height / 2 },
+    { 0, 0 }, 40, 3).text = title() -- MiddleLeft
+end)
+
+-- a chord's notes judged alike at once share one mark
+on("hit", function(hit)
+  local state = replay.state()
+  if not state or hit.judgement == "perfect" then return end
+  local list = marks[state.path] or {}
+  marks[state.path] = list
+  local m = { frame = math.max(state.cursor, 1), good = hit.judgement == "good" }
+  for _, seen in ipairs(list) do
+    if seen.frame == m.frame and seen.good == m.good then return end
+  end
+  list[#list + 1] = m
+  if ui and il2cpp.alive(ui.go) then ui.addMark(m) end
 end)
