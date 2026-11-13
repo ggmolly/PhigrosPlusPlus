@@ -1,5 +1,7 @@
 # Phigros++
 
+![Phigros++, a Lua mod loader for Phigros](assets/banner.webp)
+
 **Get it with the [Phigros++ Installer](https://github.com/ggmolly/PhigrosPlusPlus-Installer/releases/latest)**, which
 patches the Phigros installed from the Play Store on your phone.
 
