@@ -227,6 +227,7 @@ local function show(difficulty, entries)
   end
 
   page:part("shadows")
+  page:part("background") -- dims the list
   local cover = page:part("cover").transform
   infoPanel(page, s)
   topBar(page, s)

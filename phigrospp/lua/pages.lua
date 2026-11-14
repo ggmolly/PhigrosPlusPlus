@@ -8,8 +8,8 @@ local SLIDE = 0.35 -- seconds
 local STAY = { PlayerBar = true, Money = true } -- the player's bar and data stay over both pages
 -- the song list's parts by name: where they are under its content canvas, or its buttons canvas
 local PARTS = {
-  topbar = "TopBar", shadows = "Shadows", info = "SongCoverPanel", up = "upSideMask", down = "downSideMask",
-  selected = "StartInfos/SelectedSong", cover = "StartInfos/SongsCover",
+  topbar = "TopBar", shadows = "Shadows", background = "Background", info = "SongCoverPanel", up = "upSideMask",
+  down = "downSideMask", selected = "StartInfos/SelectedSong", cover = "StartInfos/SongsCover",
 }
 local BUTTONS = { back = "Back", play = "Play" }
 -- the list: rows step down and left along the song list's slant, the selected one is a bigger row between the halves
@@ -246,6 +246,7 @@ function kit.page()
   local content, buttons = mirror(selector.topBar.parent), mirror(selector.startButton.transform.parent)
   page = setmetatable({ content = content, buttons = buttons, start = now(), last = now() }, Page)
   page.moving = sliding(page)
+  copy(find(buttons.root, "Translucent Image"), buttons) -- the blurred backdrop, under the page's buttons
   selector.enabled = false -- its update moves the list and reads touches
   slide(page, 0)
   return page
