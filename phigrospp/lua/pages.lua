@@ -83,8 +83,21 @@ local function before(a, b)
   return #a < #b
 end
 
+-- a copy shows the grade its RatingDisplayController showed, but not its private rating, the grade SetRating hides
+-- before showing another: it's found again from the grade shown
+local function graded(clone)
+  local controllers = clone:GetComponentsInChildren(il2cpp.typeof(CS.RatingDisplayController), false)
+  for i = 0, #controllers - 1 do
+    local c = controllers[i]
+    for j = 0, #c.ratingObjects - 1 do
+      if c.ratingObjects[j].activeSelf then c.rating = j end
+    end
+  end
+  return clone
+end
+
 local function copy(original, canvas)
-  local clone = UE.Object.Instantiate(original.gameObject, canvas.container, false)
+  local clone = graded(UE.Object.Instantiate(original.gameObject, canvas.container, false))
   local scale, root = original.lossyScale, canvas.root.lossyScale
   clone.transform.localPosition = canvas.root:InverseTransformPoint(original.position)
   clone.transform.localScale = { scale.x / root.x, scale.y / root.y, scale.z / root.z }
@@ -195,7 +208,7 @@ function Page:list(options)
     local original = find(self.content.root, PARTS.up):GetComponentInChildren(il2cpp.typeof(CS.SongListItem), true)
     for _, half in ipairs(l.halves) do
       for i = 1, l.count do
-        local row = UE.Object.Instantiate(original.gameObject, half.mask, false):GetComponent(CS.SongListItem)
+        local row = graded(UE.Object.Instantiate(original.gameObject, half.mask, false)):GetComponent(CS.SongListItem)
         row.locked:SetActive(false)
         l.rows[#l.rows + 1] = { item = row, i = i, at = half.at }
       end
