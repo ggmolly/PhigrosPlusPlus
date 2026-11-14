@@ -241,10 +241,10 @@ end
 -- what the coming screen frame plays: k recorded frames, the first by the game's own update and the others simulated
 -- at its end. JudgeControl only judges once the music plays, which happens on its own clock, so until then k is 1
 local function plan(p)
-  -- one recorded frame per screen frame when the screen runs at the recorded rate (see on("song")), more when it
-  -- can't go that fast
-  local rate = math.floor(refresh() + 0.5)
-  p.credit = p.credit + (p.judging and JUDGE_SPEED or p.target and SEEK_SPEED or p.paused and 0 or p.speed * math.floor(p.header.refresh + 0.5) / rate)
+  -- as many recorded frames as the screen frame lasted, one each when the screen runs at the recorded rate (see
+  -- on("song")), more when it can't go that fast
+  p.credit = p.credit + (p.judging and JUDGE_SPEED or p.target and SEEK_SPEED or p.paused and 0 or
+    p.speed * p.rate * Time.unscaledDeltaTime)
   local k = math.min(math.floor(p.credit), #p.frames - p.cursor, p.target and p.target - p.cursor or math.huge)
   p.credit = p.credit - math.floor(p.credit)
   if level.progressControl.audioSource.CurrentStatus ~= 0 then k = math.min(k, 1) end
@@ -362,12 +362,16 @@ on("song", function()
   if path then
     local header, frames = file.decode(phigrospp.read(path))
     moveTouches(header, frames)
-    phigrospp.frameRate(header.refresh)
+    -- the rate it was played at, which the screen's reported refresh rate isn't always (60 Hz on the tablet at 120)
+    local seconds = 0
+    for _, frame in ipairs(frames) do seconds = seconds + frame.dt end
+    local rate = #frames / seconds
+    phigrospp.frameRate(rate)
     protect()
     quitButton()
     local r = resume or {}
     mode, resume = "watch", nil
-    playback = { path = path, header = header, frames = frames, cursor = 0, credit = 0, live = true, extra = 0,
+    playback = { path = path, header = header, frames = frames, rate = rate, cursor = 0, credit = 0, live = true, extra = 0,
       speed = r.speed or 1, paused = r.paused or false, target = r.target }
     -- the first time, it's played through fast and silently, so the seek bar marks every good, bad and miss before it
     -- plays again from its start

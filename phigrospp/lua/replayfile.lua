@@ -1,7 +1,7 @@
 -- the replay file: a header with the play's result, then every frame coded losslessly as residuals against predictions
 -- the decoder repeats, through an adaptive binary range coder (like ../../chart-codec, the web player's chart codec).
--- 132 s of play are about 46 kB, 7.5 times less than the plain floats. it's kept unsigned: sent to phigros.tools, the
--- player's public key and an ed25519 signature of everything before them end it (sign)
+-- nothing assumes a frame rate or a screen: the coder learns each device's steps. it's kept unsigned: sent to
+-- phigros.tools, the player's public key and an ed25519 signature of everything before them end it (sign)
 --
 -- frame: { t = song time, dt = delta time, touches = { { id =, phase =, x =, y = } }, and what the game's other clocks
 -- said: udt = unscaled delta time, scale = time scale, real = realtime since startup, music = the music's time (all
@@ -9,8 +9,8 @@
 -- positions are on the 1/1024 pixel grid Unity reports them on
 -- event: { kind = "pause" or "resume", frame = frames recorded before it, mono = when }, nothing is recorded in a pause
 
-local MAGIC, VERSION = "PIGEON", 4
-local DOMAIN = "phigros++ replay v4\0" -- what the signature is of, before the file's bytes
+local MAGIC, VERSION = "PIGEON", 5
+local DOMAIN = "phigros++ replay v5\0" -- what the signature is of, before the file's bytes
 -- the header, in order: the chart, the screen it was played on, when, the result (the picker reads only this), then
 -- what it was played with: the game (its update count), phigros++, the device, its android version and refresh rate,
 -- the target frame rate, the song's offset in seconds, every mods/ and core/ file with the start of its sha-512, and
@@ -25,7 +25,7 @@ local FIELDS = {
 local EVENTS = { "pause", "resume" }
 local HEADER = "<c6"
 for _, field in ipairs(FIELDS) do HEADER = HEADER .. field[2] end
-local BITS, LIMIT, MANT = 15, 30, 4 -- probability precision, slowest adaptation 1/32, adaptive bits under the top one
+local BITS, LIMIT, MANT = 15, 30, 16 -- probability precision, slowest adaptation 1/32, adaptive bits under the top one
 local ONE, TOP, MASK = 1 << BITS, 1 << 24, 0xFFFFFFFF
 local ENDED, CANCELED = 3, 4 -- TouchPhase
 
@@ -51,14 +51,33 @@ local function signed(v, cap) return v < 0 and -bucket(v, cap) or bucket(v, cap)
 
 local function near(v, cap) return math.max(-cap, math.min(cap, v)) end
 
--- touch panels report on a grid coarser than Unity's (1/10 pixel on the tablet): a position is its step on that
--- grid and what is left, which is 0 for a raw position and anything for one Android interpolated
-local function split(v)
-  local n = (v * 10 + 512) // 1024
-  return n, v - (n * 1024 + 5) // 10
+-- touch panels report on a grid coarser than Unity's (1/10 pixel on the tablet, 1/256 on a Galaxy S24): a position is
+-- its step on that grid and what is left, which is 0 for a raw position and anything for one Android interpolated
+local function join(n, rest, grid) return (n * 1024 + grid // 2) // grid + rest end
+
+local function split(v, grid)
+  local n = (v * grid + 512) // 1024
+  return n, v - join(n, 0, grid)
 end
 
-local function join(n, rest) return (n * 1024 + 5) // 10 + rest end
+-- the coarsest grid holding 9 in 10 positions, 1/10 pixel when most are interpolated
+local GRIDS = { 10, 16, 32, 64, 128, 256, 512 }
+local function gridOf(list)
+  local on, total = {}, 0
+  for _, frame in ipairs(list) do
+    for _, touch in ipairs(frame.touches) do
+      total = total + 1
+      for _, grid in ipairs(GRIDS) do
+        local _, rest = split(math.tointeger(touch.x * 1024), grid)
+        if rest == 0 then on[grid] = (on[grid] or 0) + 1 end
+      end
+    end
+  end
+  for _, grid in ipairs(GRIDS) do
+    if (on[grid] or 0) >= total * 0.9 then return grid end
+  end
+  return GRIDS[1]
+end
 
 -- one coder for both directions: encoding takes values and returns them, decoding ignores them and returns the
 -- decoded ones, so a single function describes the format
@@ -157,7 +176,7 @@ function Coder:int(name, v)
   local negative = self:bit(probs, 64, not self.decoding and v < 0 and 1 or 0)
   local below, m = n - 1, 1
   local adaptive = math.min(MANT, below)
-  for i = 1, adaptive do m = m * 2 + self:bit(probs, 100 + n * 32 + m, (a >> (below - i)) & 1) end
+  for i = 1, adaptive do m = m * 2 + self:bit(probs, 100 + (n << MANT + 1) + m, (a >> (below - i)) & 1) end
   local rest = below - adaptive
   if rest > 0 then m = (m << rest) | self:raw(rest, a & ((1 << rest) - 1)) end
   return negative == 1 and -m or m
@@ -168,8 +187,6 @@ function Coder:finish()
   return table.concat(self.out)
 end
 
-local FRAME = ordf(f32(1 / 120))
-
 local function us(seconds) return math.floor(seconds * 1e6 + 0.5) end
 
 -- a f32 coded as the floats between it and a prediction
@@ -179,7 +196,7 @@ end
 
 -- the clocks besides the song's: each predicted from the frame's delta time or another clock, so a game running at
 -- the wrong speed shows as residuals that keep growing
-local function clocks(c, frame, last, dt, t, offset)
+local function clocks(c, frame, last, dt)
   local now = {}
   now.udt = float(c, "udt", dt, frame and frame.udt)
   now.scale = float(c, "scale", last.scale, frame and frame.scale)
@@ -188,24 +205,28 @@ local function clocks(c, frame, last, dt, t, offset)
   -- the audio clock moves in steps of a buffer
   now.dspStep = c:int("dsp" .. bucket(last.dspStep, 20), frame and frame.dsp - last.dsp)
   now.dsp = last.dsp + now.dspStep
-  now.music = float(c, "music", f32(t + offset), frame and frame.music)
+  -- the music plays on the audio clock, a buffer late or early
+  now.music = float(c, "music", f32(last.music + now.dspStep / 1e6), frame and frame.music)
   now.focus = c:bit(c.contexts, "focus" .. last.focus, frame and (frame.focus and 1 or 0))
   return now
 end
 
 -- the format: codes `frames` and `events` when encoding, rebuilds them when decoding
-local function frames(c, list, events, offset)
+local function frames(c, list, events)
   local decoding = c.decoding
   local n = c:int("count", list and #list)
+  local grid = c:int("grid", list and gridOf(list))
   local out = {}
-  local t1, rdt, fix, fix2 = 0.0, 0, 0, 0 -- the last song time, delta time residual and two clock corrections
-  local clock = { scale = 1.0, mono = 0, real = 0.0, dsp = 0, dspStep = 0, focus = 1 } -- the last clocks
+  -- the last song time, delta time guess and residual, and two clock corrections
+  local t1, guess, rdt, fix, fix2 = 0.0, 0, 0, 0, 0
+  local clock = { scale = 1.0, mono = 0, real = 0.0, dsp = 0, dspStep = 0, music = 0.0, focus = 1 } -- the last clocks
   local fingers = {} -- last frame's touches: id, phase, grid steps nx ny, rests rx ry, last move vx vy, moves
   for k = 1, n do
     local frame = list and list[k]
-    -- delta times sit within nanoseconds of 1/120 s, a long one follows a short one
-    rdt = c:int("dt" .. near(rdt // 8, 6), frame and ordf(frame.dt) - FRAME)
-    local dt = unordf(FRAME + rdt)
+    -- delta times jitter around the frame rate or drift with it: the guess follows them halfway, which suits both
+    rdt = c:int("dt" .. near(rdt // 8, 6), frame and ordf(frame.dt) - guess)
+    local dt = unordf(guess + rdt)
+    guess = guess + rdt // 2
     -- the song time is the last one plus the delta time, plus the correction the game's music clock makes, which
     -- changes slowly
     local step = ordf(f32(t1 + dt))
@@ -249,8 +270,8 @@ local function frames(c, list, events, offset)
       assert(not touch or tx and ty, "replay: a touch position isn't on the 1/1024 pixel grid")
       local nx, rx, ny, ry
       if touch then
-        nx, rx = split(tx)
-        ny, ry = split(ty)
+        nx, rx = split(tx, grid)
+        ny, ry = split(ty, grid)
       end
       local f
       if last and last.nx then
@@ -284,11 +305,12 @@ local function frames(c, list, events, offset)
       used[f.id] = true
       now[i] = f
       if decoding then
-        decoded[i] = { id = f.id, phase = f.phase, x = join(f.nx, f.rx) / 1024, y = join(f.ny, f.ry) / 1024 }
+        decoded[i] = { id = f.id, phase = f.phase, x = join(f.nx, f.rx, grid) / 1024,
+          y = join(f.ny, f.ry, grid) / 1024 }
       end
     end
     fingers = now
-    clock = clocks(c, frame, clock, dt, t, offset)
+    clock = clocks(c, frame, clock, dt)
     if decoding then
       out[k] = { t = t, dt = dt, touches = decoded, udt = clock.udt, scale = clock.scale, mono = clock.mono,
         real = clock.real, dsp = clock.dsp, music = clock.music, focus = clock.focus == 1 }
@@ -327,7 +349,7 @@ phigrospp.replayfile = {
     for i, field in ipairs(FIELDS) do values[i] = h[field[1]] end
     values[1] = VERSION
     local c = coder()
-    frames(c, list, events, f32(h.offset)) -- the offset the decoder reads back from the header
+    frames(c, list, events)
     return HEADER:pack(MAGIC, table.unpack(values, 1, #FIELDS)) .. c:finish()
   end,
   -- the replay as it's uploaded, signed with the player's key
@@ -338,6 +360,6 @@ phigrospp.replayfile = {
   -- the header, frames and events
   decode = function(data)
     local h, pos = header(data)
-    return h, frames(coder(data:sub(pos)), nil, nil, h.offset)
+    return h, frames(coder(data:sub(pos)))
   end,
 }
