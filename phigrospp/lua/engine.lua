@@ -228,6 +228,17 @@ phigrospp.ui = {
     text.horizontalOverflow, text.verticalOverflow, text.color = 1, 1, { 1, 1, 1, 1 } -- Overflow
     return text
   end,
+  -- a copy of a button of the game beside it, moved by offset ({ x, y }), running fn instead of what the original does
+  clone = function(original, offset, fn)
+    local t = original.transform
+    local clone = UE.Object.Instantiate(t.gameObject, t.parent, false)
+    clone.name = "phigrospp-" .. t.name
+    clone.transform.anchoredPosition = { t.anchoredPosition.x + offset[1], t.anchoredPosition.y + offset[2] }
+    local button = clone:GetComponent(UE.UI.Button)
+    button.onClick = UE.UI.Button.ButtonClickedEvent()
+    phigrospp.click(button, fn)
+    return clone
+  end,
   danger = { 0.9, 0.27, 0.33, 1 }, -- the red of buttons that delete
   -- a dialog made from the game's own confirmation popup (the cloud save one): { title =, message =, yes =,
   -- danger = true for a red yes, no = false for yes alone (yes = false for no alone), grid = { cells =, columns = }

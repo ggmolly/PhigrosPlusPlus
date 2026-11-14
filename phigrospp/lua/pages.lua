@@ -98,12 +98,15 @@ local function copy(original, canvas)
   return clone
 end
 
--- a copy of a play button `slot` buttons left of it, showing a sprite instead of the triangle
+-- a copy of a play button `slot` buttons left of it, showing a sprite instead of the triangle. the play button's right
+-- edge is the screen's, the copy's leans like its left one
+local SIDE_GAP = 12 -- as wide as the stripe between the chapter screen's tabs
+
 function kit.sideButton(play, slot, sprite, fn)
-  local t = play.transform
-  local clone = UE.Object.Instantiate(t.gameObject, t.parent, false)
-  clone.name = "phigrospp-button"
-  clone.transform.anchoredPosition = { t.anchoredPosition.x - (t.sizeDelta.x + 24) * slot, t.anchoredPosition.y }
+  local clone = kit.clone(play, { -(play.transform.sizeDelta.x + SIDE_GAP) * slot, 0 }, fn)
+  local shape = clone:GetComponent(CS.Lean.Gui.LeanPolygon)
+  shape.Points:set_Item(1, { shape.Points:get_Item(0).x, 0, 1, 1 }) -- the top right corner moves like the top left one
+  shape:SetVerticesDirty()
   local triangle = find(clone.transform, "LeanPolygon")
   local icon = UE.GameObject("phigrospp-icon"):AddComponent(UE.UI.Image)
   icon.transform:SetParent(clone.transform, false)
@@ -111,9 +114,6 @@ function kit.sideButton(play, slot, sprite, fn)
   icon.sprite, icon.raycastTarget = sprite, false
   icon.color = triangle:GetComponent(CS.Lean.Gui.LeanPolygon).color
   UE.Object.Destroy(triangle.gameObject)
-  local button = clone:GetComponent(UE.UI.Button)
-  button.onClick = UE.UI.Button.ButtonClickedEvent() -- the copy would start the song
-  phigrospp.click(button, fn)
   return clone
 end
 
