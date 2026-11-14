@@ -70,7 +70,7 @@ local function build()
   for _, m in ipairs(marks[replay.state().path] or {}) do p.addMark(m) end
 
   local size, gap, rowY = 72 * u, 150 * u, 120 * u
-  local names = { "restart", "back", "play", "forward", "speed" }
+  local names = { "skip-back", "rewind", "play", "fast-forward", "speed" }
   for i, name in ipairs(names) do
     local x = width / 2 + (i - (#names + 1) / 2) * gap
     local button = { name = name, x = x, y = rowY, reach = gap / 2 }
@@ -89,9 +89,9 @@ local function press(name)
   local state = replay.state()
   local now = state.frames[math.max(state.cursor, 1)].t
   if name == "play" then return replay.pause(not state.paused) end
-  if name == "restart" then return replay.seek(1) end
-  if name == "back" then return replay.seek(frameAt(now - JUMP)) end
-  if name == "forward" then return replay.seek(frameAt(now + JUMP)) end
+  if name == "skip-back" then return replay.seek(1) end
+  if name == "rewind" then return replay.seek(frameAt(now - JUMP)) end
+  if name == "fast-forward" then return replay.seek(frameAt(now + JUMP)) end
   for i, speed in ipairs(SPEEDS) do
     if speed == state.speed then return replay.speed(SPEEDS[i % #SPEEDS + 1]) end
   end

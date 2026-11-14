@@ -190,60 +190,6 @@ function phigrospp.sprite(n, shape)
   return phigrospp.asset(UE.Sprite.Create(texture, { 0, 0, n, n }, { 0.5, 0.5 }))
 end
 
--- the Phigros++ screens (replay player and picker): canvases over everything, pieces placed in screen pixels from the
--- bottom left, and icons drawn from shapes
-local function polygon(points)
-  return function(x, y)
-    local d = -math.huge
-    for i, a in ipairs(points) do
-      local b = points[i % #points + 1]
-      local nx, ny = b[2] - a[2], a[1] - b[1]
-      d = math.max(d, ((x - a[1]) * nx + (y - a[2]) * ny) / math.sqrt(nx * nx + ny * ny))
-    end
-    return d
-  end
-end
-
-local function union(...)
-  local shapes = { ... }
-  return function(x, y)
-    local d = math.huge
-    for _, shape in ipairs(shapes) do d = math.min(d, shape(x, y)) end
-    return d
-  end
-end
-
-local function mirror(shape) return function(x, y) return shape(-x, y) end end
-local function flip(shape) return function(x, y) return shape(x, -y) end end
-local function box(cx, cy, hw, hh) return polygon({ { cx - hw, cy - hh }, { cx + hw, cy - hh }, { cx + hw, cy + hh }, { cx - hw, cy + hh } }) end
-
--- a stroke w wide from a to b
-local function stroke(ax, ay, bx, by, w)
-  local dx, dy = bx - ax, by - ay
-  local nx, ny = -dy / math.sqrt(dx * dx + dy * dy) * w / 2, dx / math.sqrt(dx * dx + dy * dy) * w / 2
-  return polygon({ { ax - nx, ay - ny }, { bx - nx, by - ny }, { bx + nx, by + ny }, { ax + nx, ay + ny } })
-end
-
-local FORWARD = union(polygon({ { -38, -28 }, { 2, 0 }, { -38, 28 } }), polygon({ { 2, -28 }, { 42, 0 }, { 2, 28 } }))
-local ARROW = union(polygon({ { -40, 0 }, { -6, -34 }, { -6, 34 } }), box(14, 0, 26, 5)) -- pointing left
-local SQUARE = function(x, y) return math.abs(box(0, 0, 30, 30)(x, y)) - 4 end -- an outline
--- 96 pixel icons, as signed distances (see phigrospp.sprite)
-local ICONS = {
-  play = polygon({ { -26, -36 }, { 36, 0 }, { -26, 36 } }),
-  pause = union(box(-17, 0, 9, 34), box(17, 0, 9, 34)),
-  forward = FORWARD,
-  back = mirror(FORWARD),
-  restart = union(box(-32, 0, 5, 30), mirror(polygon({ { -24, -32 }, { 32, 0 }, { -24, 32 } }))),
-  close = ARROW,
-  cross = union(stroke(-32, -32, 32, 32, 10), stroke(-32, 32, 32, -32, 10)),
-  bin = union(box(0, 30, 34, 4), box(0, 37, 10, 4), polygon({ { -20, -38 }, { 20, -38 }, { 26, 22 }, { -26, 22 } })),
-  down = union(polygon({ { -24, -8 }, { 24, -8 }, { 0, -38 } }), box(0, 14, 5, 24)), -- an arrow pointing down
-  unchecked = SQUARE,
-  checked = union(SQUARE, stroke(-15, 2, -3, -11, 8), stroke(-6, -11, 16, 13, 8)),
-}
-ICONS.up = flip(ICONS.down)
-local icons = {}
-
 -- the open dialog's bar, redrawn every frame, and what closes it
 local drawBar, closeDialog
 
@@ -251,6 +197,8 @@ on("update", function()
   if drawBar then drawBar() end
 end)
 
+-- the Phigros++ screens (replay player and picker): canvases over everything, pieces placed in screen pixels from the
+-- bottom left, and icons (icons.lua)
 phigrospp.ui = {
   overlay = function(name, order)
     local go = UE.GameObject(name)
@@ -279,10 +227,6 @@ phigrospp.ui = {
     text.font, text.fontSize, text.alignment = font, math.floor(fontSize), alignment
     text.horizontalOverflow, text.verticalOverflow, text.color = 1, 1, { 1, 1, 1, 1 } -- Overflow
     return text
-  end,
-  icon = function(name)
-    icons[name] = icons[name] or phigrospp.sprite(96, ICONS[name])
-    return icons[name]
   end,
   danger = { 0.9, 0.27, 0.33, 1 }, -- the red of buttons that delete
   -- a dialog made from the game's own confirmation popup (the cloud save one): { title =, message =, yes =,

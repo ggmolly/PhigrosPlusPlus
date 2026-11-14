@@ -182,7 +182,7 @@ end
 -- the game's pause button is a cross while watching: quit(position) is whether a real tap is on it
 local function quitButton()
   local icon = level.judgeControl.pauseRing.transform.parent
-  icon:GetComponent(UE.UI.Image).sprite = phigrospp.ui.icon("cross")
+  icon:GetComponent(UE.UI.Image).sprite = phigrospp.ui.icon("x")
   local canvas = icon:GetComponentInParent(il2cpp.typeof(UE.Canvas), true)
   local camera = canvas.renderMode ~= 0 and canvas.worldCamera or nil -- ScreenSpaceOverlay has none
   local reach = 100 * Screen.height / 1080

@@ -17,15 +17,6 @@ local PHI_LIFT = 0.2 -- φ hangs below the line in the game's font, onto the dif
 local selector, clock, loading
 local sort, descending, onlyMine = "date", true, false
 
--- a clock: a ring and two hands
-local function clockShape(x, y)
-  local function hand(hx, hy)
-    local t = math.max(0, math.min(1, (x * hx + y * hy) / (hx * hx + hy * hy)))
-    return math.sqrt((x - t * hx) ^ 2 + (y - t * hy) ^ 2)
-  end
-  return math.min(math.abs(math.sqrt(x * x + y * y) - 40), hand(0, 24), hand(17, 0)) - 3.5
-end
-
 local function chart()
   local info = selector.SongItems._items[selector.nowSong].songInfo
   return info.songsId, info.levels[selector.nowLevel]
@@ -137,7 +128,7 @@ local function topBar(page, s)
   local icon = find(own, "Icon")
   icon.sizeDelta = { 34, 34 }
   local box = icon:GetComponent(UE.UI.Image)
-  local function tick() box.sprite = kit.icon(onlyMine and "checked" or "unchecked") end
+  local function tick() box.sprite = kit.icon(onlyMine and "square-check" or "square") end
   tick()
   phigrospp.click(own:GetComponent(UE.UI.Button), function()
     onlyMine = not onlyMine
@@ -257,7 +248,7 @@ local function show(difficulty, entries)
       watch(entry)
     end)
   end)
-  bin = kit.sideButton(play, 1, kit.icon("bin"), function()
+  bin = kit.sideButton(play, 1, kit.icon("trash-2"), function()
     local entry = s.selected
     local h = entry.header
     if not kit.confirm({ title = "Delete replay", yes = "Delete", danger = true,
@@ -307,7 +298,7 @@ end)
 
 on("update", function()
   if not selector or selector.SongItems._size == 0 then return end -- the list fills in after the scene starts
-  clock = clock or kit.sideButton(selector.startButton, 1, phigrospp.sprite(96, clockShape), function()
+  clock = clock or kit.sideButton(selector.startButton, 1, kit.icon("clock"), function()
     if not kit.paging() and not loading then open(chart()) end -- a second tap while the page slides in
   end)
   local playable = not selector.locked.activeSelf
