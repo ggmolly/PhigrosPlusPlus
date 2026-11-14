@@ -14,6 +14,8 @@ It comes with:
   change the speed.
 - **phigros.tools sync**: an opt-in profile on [phigros.tools](https://phigros.tools) with the player's records,
   replays and play stats.
+- **The phigros.tools leaderboard** in the game: the players by RKS, from a trophy next to the chapter screen's
+  settings.
 - **A HUD** with the grade and accuracy the play is heading for and a hit error bar, and an option to skip the game's
   artificial loading delays.
 
