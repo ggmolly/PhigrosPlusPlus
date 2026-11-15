@@ -79,6 +79,7 @@ local showAccuracy = setting("Accuracy", true)
 local showBar = setting("Timing bar", true)
 local hud
 local pending = {}
+local judged = true -- a judgement since the last frame, so the accuracy and grade can change
 -- reused for every tick, every frame: the bridge copies their values into the game
 local tickColour, tickSize = { 0, 0, 0, 0 }, { LAYOUT.tickThickness, 0 }
 
@@ -127,13 +128,14 @@ end
 
 local function outQuint(t) return 1 - (1 - t) ^ 5 end
 
--- osu! BarHitErrorMeter: ticks fade in over 100 ms, then fade and shrink over 5 s
+-- osu! BarHitErrorMeter: ticks fade in over 100 ms, then fade and shrink over 5 s. a tick is only redrawn when the
+-- change shows (a step of alpha, half a pixel), most frames of the slow fade change nothing
 local function updateBar(time)
   if #pending > 0 then
     for _, event in ipairs(pending) do
       local tick = hud.ticks[hud.next]
       hud.next = hud.next % #hud.ticks + 1
-      tick.born, tick.colour, tick.live = time, JUDGE[event.kind].colour, true
+      tick.born, tick.colour, tick.live, tick.alpha, tick.length = time, JUDGE[event.kind].colour, true, nil, nil
       tick.rect.anchoredPosition = { hud.x(event.ms), hud.barY }
       hud.average = hud.average * 0.9 + event.ms * 0.1
     end
@@ -150,10 +152,16 @@ local function updateBar(time)
       else
         tick.live = false
       end
-      tickColour[1], tickColour[2], tickColour[3], tickColour[4] = tick.colour[1], tick.colour[2], tick.colour[3], alpha
-      tickSize[2] = LAYOUT.tickLength * length
-      tick.image.color = tickColour
-      tick.rect.sizeDelta = tickSize
+      alpha, length = math.floor(alpha * 255 + 0.5), math.floor(LAYOUT.tickLength * length * 2 + 0.5) / 2
+      if alpha ~= tick.alpha then
+        tick.alpha = alpha
+        tickColour[1], tickColour[2], tickColour[3], tickColour[4] = tick.colour[1], tick.colour[2], tick.colour[3], alpha / 255
+        tick.image.color = tickColour
+      end
+      if length ~= tick.length then
+        tick.length, tickSize[2] = length, length
+        tick.rect.sizeDelta = tickSize
+      end
     end
   end
   -- frame rate independent easing towards the average
@@ -167,19 +175,21 @@ local function updateBar(time)
 end
 
 local function refresh(self)
-  local score = self.score
   if not hud or hud.owner ~= self then
-    pending = {}
-    hud = buildHud(self, score)
+    pending, judged = {}, true
+    hud = buildHud(self, self.score)
   end
+  if hud.ticks then updateBar(now() * 1000) end
+  if not judged then return end
+  judged = false
 
   local p, g, b, m = self.perfect, self.good, self.bad, self.miss
-  local judged, fc = p + g + b + m, b + m == 0
-  local exact = judged > 0 and (p + 0.65 * g) / judged or 1
+  local count, fc = p + g + b + m, b + m == 0
+  local exact = count > 0 and (p + 0.65 * g) / count or 1
   local accuracy = math.floor(exact * 10000) -- in hundredths of a percent, as shown
   -- the grade if the rest of the chart goes like it went so far
-  local pace = 900000 * exact + (fc and 100000 or 100000 * self.maxcombo / judged)
-  local rank = judged > 0 and grade(math.floor(pace + 0.5), fc) or ""
+  local pace = 900000 * exact + (fc and 100000 or 100000 * self.maxcombo / count)
+  local rank = count > 0 and grade(math.floor(pace + 0.5), fc) or ""
 
   if accuracy ~= hud.accuracy or rank ~= hud.rank then
     hud.accuracy, hud.rank = accuracy, rank
@@ -192,16 +202,16 @@ local function refresh(self)
       hud.grade.transform.anchoredPosition = { right, hud.infoY + lift }
     end
   end
-  if hud.ticks then updateBar(now() * 1000) end
 end
 
 hook(CS.ScoreControl, "Update", { after = refresh })
 
--- judgeTime is the signed hit offset in seconds, 0 for drags and flicks
-for method, kind in pairs({ Perfect = "perfect", Good = "good", Bad = "bad" }) do
+-- judgeTime is the signed hit offset in seconds, 0 for drags and flicks. a miss has no tick
+for method, kind in pairs({ Perfect = "perfect", Good = "good", Bad = "bad", Miss = false }) do
   hook(CS.ScoreControl, method, {
     before = function(_, _, judgeTime)
-      if hud and hud.ticks and judgeTime ~= 0 then
+      judged = true
+      if kind and hud and hud.ticks and judgeTime ~= 0 then
         pending[#pending + 1] = { kind = kind, ms = judgeTime * 1000 }
       end
     end,
