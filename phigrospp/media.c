@@ -1,23 +1,27 @@
-// decodes a song (opus in webm, or anything else android reads) into samples for an AudioClip, since the game has no
-// audio decoder of its own. it runs on a thread so the game keeps drawing meanwhile
+// decodes a song (opus in webm, or anything else the system reads) into samples for an AudioClip, since the game has
+// no audio decoder of its own. it runs on a thread so the game keeps drawing meanwhile
 #include <fcntl.h>
-#include <media/NdkMediaCodec.h>
-#include <media/NdkMediaExtractor.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <AudioToolbox/AudioToolbox.h>
+#else
+#include <media/NdkMediaCodec.h>
+#include <media/NdkMediaExtractor.h>
+#endif
 
 #include "lauxlib.h"
 #include "opus.h"
 #include "phigrospp.h"
 
-#define WAIT_US 1000  // for an output buffer of android's decoder, its input side never waits so it always has work
-
 static const char *DECODE_MT = "phigrospp.Decode";
+static const char NOT_OPUS[] = "not opus in webm";
 
 typedef struct {
   pthread_t thread;
@@ -30,7 +34,7 @@ typedef struct {
   bool joined;
 } Job;
 
-static void append(Job *job, const uint8_t *data, size_t size) {
+static void append(Job *job, const void *data, size_t size) {
   size_t n = size / 2;
   if (job->samples + n > job->capacity) {
     job->capacity = (job->samples + n) * 2;
@@ -40,40 +44,126 @@ static void append(Job *job, const uint8_t *data, size_t size) {
   job->samples += n;
 }
 
-// decodes opus in the process with libopus: android's own decoder runs in another process and costs a call there per
-// 20 ms packet, too slow for a whole song. the encoder's first pre-skip samples are dropped, as players do
-static const char *opus(Job *job, AMediaExtractor *extractor, AMediaFormat *format) {
-  const uint8_t *head;  // OpusHead: "OpusHead", version, channels, pre-skip (u16le)...
-  size_t size;
-  int error;
-  if (!AMediaFormat_getBuffer(format, "csd-0", (void **)&head, &size) || size < 19 || memcmp(head, "OpusHead", 8))
-    return "no opus header";
-  job->channels = head[9], job->rate = 48000;
-  if (job->channels > 2) return "more than 2 channels";
-  OpusDecoder *decoder = opus_decoder_create(48000, job->channels, &error);
-  if (!decoder) return "opus failed";
-  size_t skip = (size_t)(head[10] | head[11] << 8) * job->channels;
-  uint8_t *packet = malloc(1 << 16);
-  int16_t *frame = malloc(5760 * 2 * sizeof *frame);  // 120 ms at 48 kHz, the longest an opus packet decodes to
-  const char *why = NULL;
-  for (ssize_t n; !why && !atomic_load(&job->cancel) && (n = AMediaExtractor_readSampleData(extractor, packet, 1 << 16)) >= 0;
-       AMediaExtractor_advance(extractor)) {
-    int got = opus_decode(decoder, packet, (opus_int32)n, frame, 5760, 0);
-    if (got < 0) {
-      why = "broken opus packet";
-      break;
-    }
-    size_t samples = (size_t)got * job->channels, drop = skip < samples ? skip : samples;
-    skip -= drop;
-    append(job, (const uint8_t *)(frame + drop), (samples - drop) * 2);
-  }
-  free(packet);
-  free(frame);
-  opus_decoder_destroy(decoder);
-  return why;
+// matroska elements: the masters listed are entered, any other element is skipped
+enum {
+  EBML = 0x1A45DFA3, SEGMENT = 0x18538067, INFO = 0x1549A966, TRACKS = 0x1654AE6B, TRACK = 0xAE, CLUSTER = 0x1F43B675,
+  GROUP = 0xA0, SCALE = 0x2AD7B1, DURATION = 0x4489, NUMBER = 0xD7, CODEC = 0x86, SIMPLE_BLOCK = 0xA3, BLOCK = 0xA1,
+  PRIVATE = 0x63A2,
+};
+
+// an ebml number, its first byte's leading zeros tell its length. ids keep the length bit, sizes don't
+static bool vint(const uint8_t **at, const uint8_t *end, bool id, uint64_t *value) {
+  if (*at >= end || !**at) return false;
+  int n = __builtin_clz(**at) - 23;
+  if (end - *at < n) return false;
+  *value = id ? **at : **at & (0xFF >> n);
+  for (int i = 1; i < n; i++) *value = *value << 8 | (*at)[i];
+  *at += n;
+  return true;
 }
 
-// any other format through android's decoder, keeping the 16-bit samples it gives
+// decodes opus in webm in the process with libopus, the system's decoder is much slower on android. the encoder's
+// first pre-skip samples are dropped, as players do. NOT_OPUS for any other file
+static const char *webm(Job *job, const uint8_t *at, const uint8_t *end) {
+  const uint8_t *head = NULL;  // OpusHead: "OpusHead", version, channels, pre-skip (u16le)...
+  uint64_t id, size, number = 0, track = 0, scale = 1000000;
+  double duration = 0;  // in units of scale nanoseconds
+  size_t skip = 0;
+  OpusDecoder *decoder = NULL;
+  int16_t frame[5760 * 2];  // 120 ms at 48 kHz, the longest an opus packet decodes to
+  const char *why = NULL;
+  for (bool first = true; at < end && !why && !atomic_load(&job->cancel); first = false) {
+    bool read = vint(&at, end, true, &id) && vint(&at, end, false, &size);
+    if (first && (!read || id != EBML)) return NOT_OPUS;
+    if (!read) why = "broken webm";
+    else if (id == SEGMENT || id == INFO || id == TRACKS || id == TRACK || id == CLUSTER || id == GROUP) continue;
+    // also catches a leaf of unknown size, all ones
+    else if (size > (uint64_t)(end - at)) why = "broken webm";
+    if (why) break;
+    const uint8_t *data = at, *packet = at + size;
+    at = packet;
+    uint64_t value = 0;  // big endian, for the numbers below
+    for (const uint8_t *c = data; c < packet && size <= 8; c++) value = value << 8 | *c;
+    if (id == NUMBER) {
+      number = value;
+    } else if (id == SCALE) {
+      scale = value;
+    } else if (id == DURATION && size == 4) {
+      float f;
+      memcpy(&f, &(uint32_t){(uint32_t)value}, 4);
+      duration = f;
+    } else if (id == DURATION && size == 8) {
+      memcpy(&duration, &value, 8);
+    } else if (id == CODEC && size == 6 && !memcmp(data, "A_OPUS", 6)) {
+      track = number;
+    } else if (id == PRIVATE && size >= 19 && !memcmp(data, "OpusHead", 8)) {
+      head = data;
+    } else if (id == SIMPLE_BLOCK || id == BLOCK) {
+      if (!decoder) {
+        if (!track || !head) return NOT_OPUS;
+        int error;
+        job->channels = head[9], job->rate = 48000;
+        if (job->channels > 2) why = "more than 2 channels";
+        else if (!(decoder = opus_decoder_create(48000, job->channels, &error))) why = "opus failed";
+        skip = (size_t)(head[10] | head[11] << 8) * job->channels;
+        job->capacity = (size_t)(duration * scale / 1e9 * 48000 + 5760) * job->channels;
+        job->pcm = malloc(job->capacity * 2);
+      }
+      // the block's track, a 16-bit time and flags, then the packet when it isn't laced
+      if (why || !vint(&data, packet, false, &number) || number != track) continue;
+      if (packet - data < 3 || data[2] & 0x06) {
+        why = "laced webm blocks";
+        break;
+      }
+      data += 3;
+      int got = opus_decode(decoder, data, (opus_int32)(packet - data), frame, 5760, 0);
+      if (got < 0) {
+        why = "broken opus packet";
+        break;
+      }
+      size_t samples = (size_t)got * job->channels, drop = skip < samples ? skip : samples;
+      skip -= drop;
+      append(job, frame + drop, (samples - drop) * 2);
+    }
+  }
+  if (decoder) opus_decoder_destroy(decoder);
+  return why ? why : decoder ? NULL : "no audio";
+}
+
+#ifdef __APPLE__
+// any other format through the system's decoder, as 16-bit samples
+static const char *system_decode(Job *job, int fd, off_t size) {
+  (void)fd, (void)size;
+  CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)job->path, strlen(job->path), false);
+  ExtAudioFileRef file;
+  OSStatus status = ExtAudioFileOpenURL(url, &file);
+  CFRelease(url);
+  if (status) return "unreadable file";
+  AudioStreamBasicDescription in;
+  UInt32 n = sizeof in;
+  const char *why = ExtAudioFileGetProperty(file, kExtAudioFileProperty_FileDataFormat, &n, &in) ? "unreadable file" : NULL;
+  UInt32 channels = in.mChannelsPerFrame, bytes = 2 * channels;
+  AudioStreamBasicDescription out = {
+      .mSampleRate = in.mSampleRate, .mFormatID = kAudioFormatLinearPCM, .mChannelsPerFrame = channels,
+      .mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked, .mBitsPerChannel = 16,
+      .mFramesPerPacket = 1, .mBytesPerFrame = bytes, .mBytesPerPacket = bytes,
+  };
+  if (!why && ExtAudioFileSetProperty(file, kExtAudioFileProperty_ClientDataFormat, sizeof out, &out))
+    why = "decoder failed";
+  job->channels = (int32_t)channels, job->rate = (int32_t)in.mSampleRate;
+  int16_t buffer[4096 * 8];
+  for (UInt32 frames = 1; !why && frames && !atomic_load(&job->cancel);) {
+    frames = sizeof buffer / bytes;
+    AudioBufferList list = {1, {{channels, frames * bytes, buffer}}};
+    if (ExtAudioFileRead(file, &frames, &list)) why = "broken audio";
+    else append(job, buffer, frames * bytes);
+  }
+  ExtAudioFileDispose(file);
+  return why;
+}
+#else
+#define WAIT_US 1000  // for an output buffer of android's decoder, its input side never waits so it always has work
+
 static const char *codec(Job *job, AMediaExtractor *extractor, AMediaFormat *format, const char *mime) {
   AMediaCodec *codec = AMediaCodec_createDecoderByType(mime);
   const char *error = !codec ? "no decoder"
@@ -136,22 +226,33 @@ static const char *run(Job *job, AMediaExtractor *extractor) {
   AMediaFormat_getInt64(format, AMEDIAFORMAT_KEY_DURATION, &duration);
   job->capacity = (size_t)(duration / 1000000.0 * job->rate * job->channels) + 4096;
   job->pcm = malloc(job->capacity * 2);
-  const char *error = !strcmp(mime, "audio/opus") ? opus(job, extractor, format) : codec(job, extractor, format, mime);
+  const char *error = codec(job, extractor, format, mime);
   AMediaFormat_delete(format);
-  return error ? error : atomic_load(&job->cancel) ? "cancelled" : NULL;
+  return error;
 }
+
+// any other format through android's decoder, keeping the 16-bit samples it gives
+static const char *system_decode(Job *job, int fd, off_t size) {
+  AMediaExtractor *extractor = AMediaExtractor_new();
+  const char *error = AMediaExtractor_setDataSourceFd(extractor, fd, 0, size) ? "unreadable file" : run(job, extractor);
+  AMediaExtractor_delete(extractor);
+  return error;
+}
+#endif
 
 static void *decode(void *arg) {
   Job *job = arg;
   int fd = open(job->path, O_RDONLY | O_CLOEXEC);
   struct stat st;
-  if (fd < 0 || fstat(fd, &st)) {
+  void *data = MAP_FAILED;
+  if (fd < 0 || fstat(fd, &st) || (data = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0)) == MAP_FAILED) {
     job->error = "can't open the file";
   } else {
-    AMediaExtractor *extractor = AMediaExtractor_new();
-    job->error = AMediaExtractor_setDataSourceFd(extractor, fd, 0, st.st_size) ? "unreadable file" : run(job, extractor);
-    AMediaExtractor_delete(extractor);
+    job->error = webm(job, data, (uint8_t *)data + st.st_size);
+    if (job->error == NOT_OPUS) job->error = system_decode(job, fd, st.st_size);
+    if (!job->error && atomic_load(&job->cancel)) job->error = "cancelled";
   }
+  if (data != MAP_FAILED) munmap(data, st.st_size);
   if (fd >= 0) close(fd);
   atomic_store(&job->done, true);
   return NULL;
