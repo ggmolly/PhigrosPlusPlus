@@ -10,11 +10,24 @@
 #define SLOT 280     // 24 bytes kept from phigrospp_enter to phigrospp_leave
 #define FRAME 304
 
+// mach-o (ios) prefixes c names with _ and spells relocations and hidden symbols its own way
+#ifdef __APPLE__
+#define C(name) _##name
+#define PAGE(name) _##name@PAGE
+#define PAGEOFF(name) _##name@PAGEOFF
+#define HIDDEN .private_extern
+#else
+#define C(name) name
+#define PAGE(name) name
+#define PAGEOFF(name) :lo12:name
+#define HIDDEN .hidden
+#endif
+
     .text
     .p2align 3
-    .globl phigrospp_thunks
-    .hidden phigrospp_thunks
-phigrospp_thunks:
+    .globl C(phigrospp_thunks)
+    HIDDEN C(phigrospp_thunks)
+C(phigrospp_thunks):
     .set id, 0
     .rept THUNKS
     mov x16, #id
@@ -48,7 +61,7 @@ common:
     add x1, sp, #X
     add x2, sp, #V
     add x3, sp, #SLOT
-    bl phigrospp_enter
+    bl C(phigrospp_enter)
     cbnz w0, done
 
     add x9, x29, #16 // the caller's sp
@@ -71,8 +84,8 @@ common:
     ldp q4, q5, [sp, #V + 64]
     ldp q6, q7, [sp, #V + 96]
     ldr x16, [sp, #ID]
-    adrp x17, phigrospp_originals
-    add x17, x17, :lo12:phigrospp_originals
+    adrp x17, PAGE(phigrospp_originals)
+    add x17, x17, PAGEOFF(phigrospp_originals)
     ldr x17, [x17, x16, lsl #3]
     blr x17
 
@@ -84,7 +97,7 @@ common:
     add x1, sp, #X
     add x2, sp, #V
     add x3, sp, #SLOT
-    bl phigrospp_leave
+    bl C(phigrospp_leave)
 
 done:
     ldp x0, x1, [sp, #X]

@@ -76,7 +76,9 @@ local function played()
   end
   table.sort(files)
   environment = { game = CS.CloudSaveSummary.FromLocalSave().GameVersion, phigrospp = phigrospp.version,
-    device = UE.SystemInfo.deviceModel, android = getprop("ro.build.version.release"),
+    -- ios has no getprop, its version ("iOS 17.5") stands in for android's
+    device = UE.SystemInfo.deviceModel,
+    android = phigrospp.platform == "android" and getprop("ro.build.version.release") or UE.SystemInfo.operatingSystem,
     refresh = refresh(), fps = UE.Application.targetFrameRate,
     files = table.concat(files, ","), dpi = Screen.dpi }
   return environment

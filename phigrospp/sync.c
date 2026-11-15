@@ -2,18 +2,11 @@
 // signed chart manifests), and x25519 for pairing a device. all keys and hashes are lua strings of raw bytes
 #include <stdlib.h>
 #include <string.h>
-#include <sys/syscall.h>
-#include <unistd.h>
 
 #include "lauxlib.h"
 #include "tweetnacl.c"  // included rather than linked, to derive key pairs from a seed with its static helpers
 
-void randombytes(u8 *out, u64 n) {
-  while (n) {
-    long got = syscall(__NR_getrandom, out, n, 0);
-    if (got > 0) out += got, n -= got;
-  }
-}
+void randombytes(u8 *out, u64 n) { arc4random_buf(out, n); }
 
 // crypto_sign_keypair with the secret seed given instead of drawn
 static void keypair(u8 pk[32], u8 sk[64], const u8 *seed) {
