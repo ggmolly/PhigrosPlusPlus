@@ -68,6 +68,7 @@ on("scene", function(name)
     local version = UE.Object.FindObjectOfType(CS.Setting).versionText
     -- a reload finds the text as the previous run left it, maybe with another version after an update
     version.text = ("%s (%s)"):format((version.text:gsub(" %(Phigros%+%+ [^)]*%)$", "")), LABEL)
+    version.horizontalOverflow = 1 -- Overflow, the game's box only fits its own version
     plusPlus(version.transform.parent.parent:Find("Logo"), version.font)
   elseif name == "SplashScene" then
     -- the title screen's version and logo show up once the splash logos are over
