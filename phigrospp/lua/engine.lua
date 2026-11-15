@@ -152,6 +152,18 @@ on("update", function()
   focused = UE.Application.isFocused
 end)
 
+-- a function calling a java getter of an object, with no local reference left behind each time
+local function getter(object, name, signature, kind)
+  object = JNI.NewGlobalRef(object)
+  local method = JNI.GetMethodID(JNI.GetObjectClass(object), name, signature)
+  return function() return JNI["Call" .. kind .. "Method"](object, method, {}) end
+end
+
+-- the screen's refresh rate right now (Hz), and android's thermal status from 0 (none) to 6 (shutdown)
+phigrospp.refreshRate = getter(call(activity(), "getDisplay", "()Landroid/view/Display;"), "getRefreshRate", "()F", "Float")
+phigrospp.thermal = getter(call(activity(), "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", { jstring("power") }),
+  "getCurrentThermalStatus", "()I", "Int")
+
 -- the app's own folder, which no other app can read on any android: for secrets (the phigros.tools key)
 function phigrospp.private()
   local dir = call(activity(), "getFilesDir", "()Ljava/io/File;")

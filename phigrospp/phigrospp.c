@@ -113,6 +113,22 @@ static char root[512];
 static volatile int load_pending;
 // bumped on each reload so calls that started under the old lua state are ignored
 static uint32_t generation = 1;
+static double busy, started;  // seconds spent holding the lock (lua and the bridge), for phigrospp.busy()
+static int depth;
+
+static double seconds(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+// a hooked method lua calls runs inside the outer call, only the outer one is counted
+static void enter_busy(void) {
+  if (depth++ == 0) started = seconds();
+}
+static void leave_busy(void) {
+  if (--depth == 0) busy += seconds() - started;
+}
 
 static __thread bool attached;
 static void ensure_attached(void) {
@@ -849,6 +865,7 @@ bool phigrospp_enter(size_t id, uint64_t *x, uint8_t *v, uint64_t *slot) {
   }
   if (!t->befores && !t->afters && !t->skips) return false;
   pthread_mutex_lock(&lock);
+  enter_busy();
   if (L) {
     ensure_attached();
     int top = lua_gettop(L);
@@ -892,6 +909,7 @@ bool phigrospp_enter(size_t id, uint64_t *x, uint8_t *v, uint64_t *slot) {
     }
     lua_settop(L, top);
   }
+  leave_busy();
   pthread_mutex_unlock(&lock);
   return skip;
 }
@@ -900,6 +918,7 @@ bool phigrospp_enter(size_t id, uint64_t *x, uint8_t *v, uint64_t *slot) {
 void phigrospp_leave(size_t id, uint64_t *x, uint8_t *v, uint64_t *slot) {
   if (!slot[0]) return;
   pthread_mutex_lock(&lock);
+  enter_busy();
   if (L && (uint32_t)slot[2] == generation) {
     Target *t = &targets[id];
     // counted in phigrospp_enter: lua_rawlen would stop at a nil argument
@@ -933,6 +952,7 @@ void phigrospp_leave(size_t id, uint64_t *x, uint8_t *v, uint64_t *slot) {
     luaL_unref(L, LUA_REGISTRYINDEX, ref);
     lua_settop(L, top);
   }
+  leave_busy();
   pthread_mutex_unlock(&lock);
 }
 
@@ -1000,9 +1020,12 @@ static int l_reload(lua_State *L) {
 }
 
 static int l_now(lua_State *L) {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  lua_pushnumber(L, ts.tv_sec + ts.tv_nsec / 1e9);
+  lua_pushnumber(L, seconds());
+  return 1;
+}
+
+static int l_busy(lua_State *L) {
+  lua_pushnumber(L, busy);
   return 1;
 }
 
@@ -1093,6 +1116,8 @@ static void load(void) {
   set_string(L, "root", root);
   lua_pushcfunction(L, l_reload);
   lua_setfield(L, -2, "reload");
+  lua_pushcfunction(L, l_busy);
+  lua_setfield(L, -2, "busy");
   open_sync(L);
   open_phc(L);
   open_media(L);
@@ -1168,12 +1193,14 @@ static uint64_t signature(const char *dir, int depth) {
 
 static void tick(void) {
   pthread_mutex_lock(&lock);
+  enter_busy();
   ensure_attached();
   if (load_pending) {
     load_pending = 0;
     load();
   }
   if (L) emit("update");
+  leave_busy();
   pthread_mutex_unlock(&lock);
 }
 

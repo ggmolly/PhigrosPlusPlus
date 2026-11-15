@@ -342,6 +342,20 @@ il2cpp = {
   end,
 }
 
+-- seconds each mod spent in its handlers and hooks since load, by its name ("hud", or "settings" for the core's)
+phigrospp.spent = {}
+
+local function timed(fn)
+  if not fn then return nil end
+  local name = debug.getinfo(fn, "S").source:gsub("/init%.lua$", ""):match("[^/=@]+$"):gsub("%.lua$", "")
+  return function(...)
+    local start = now()
+    local result = fn(...)
+    phigrospp.spent[name] = (phigrospp.spent[name] or 0) + now() - start
+    return result
+  end
+end
+
 function hook(cls, name, params, callbacks)
   if callbacks == nil then params, callbacks = nil, params end
   local k = classOf(cls)
@@ -358,7 +372,7 @@ function hook(cls, name, params, callbacks)
     error(("hook %s.%s: %d overloads match, pass params to pick one of %s"):format(info(k).fullname, name, #matches,
       describeAll(list)), 2)
   end
-  return raw.hook(matches[1].ptr, callbacks.before, callbacks.after, callbacks.skip)
+  return raw.hook(matches[1].ptr, timed(callbacks.before), timed(callbacks.after), timed(callbacks.skip))
 end
 
 unhook = raw.unhook
@@ -367,7 +381,7 @@ local handlers = {}
 
 function on(event, fn)
   handlers[event] = handlers[event] or {}
-  table.insert(handlers[event], { fn = fn, errors = 0 })
+  table.insert(handlers[event], { fn = timed(fn), errors = 0 })
   return fn
 end
 
