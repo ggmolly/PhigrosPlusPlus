@@ -22,9 +22,15 @@ phigrospp_thunks:
     .set id, id + 1
     .endr
 
+// the cfi lines let unwinders (simpleperf) walk from a hook to the game's code that called the hooked function
 common:
+    .cfi_startproc
     stp x29, x30, [sp, #-16]!
+    .cfi_def_cfa_offset 16
     mov x29, sp
+    .cfi_def_cfa x29, 16
+    .cfi_offset x30, -8
+    .cfi_offset x29, -16
     sub sp, sp, #FRAME
 
     stp x0, x1, [sp, #X]
@@ -87,3 +93,4 @@ done:
     add sp, sp, #FRAME
     ldp x29, x30, [sp], #16
     ret
+    .cfi_endproc

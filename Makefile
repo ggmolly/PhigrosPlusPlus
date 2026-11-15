@@ -9,7 +9,7 @@ SPLIT := out/split_config.arm64_v8a.apk
 # every target talks to the same device or files, one at a time
 .NOTPARALLEL:
 
-.PHONY: all lib apk verify install install-full push push-core reset start stop restart logs dev release publish clean
+.PHONY: all lib apk verify install install-full push push-core reset start stop restart logs profile dev release publish clean
 
 all: apk
 
@@ -52,6 +52,10 @@ restart: stop start
 
 logs:
 	adb logcat -s 'phigros++' DEBUG
+
+# where the game's main thread spends SECONDS of play, by C# method, and a flame graph of every thread
+profile:
+	python3 scripts/profile.py $(APKS)/dump/script.json $(or $(SECONDS),10)
 
 # the signed bundle, its version line, the lib and the installer's manifest in out/ (needs the release key, see
 # scripts/release.sh)

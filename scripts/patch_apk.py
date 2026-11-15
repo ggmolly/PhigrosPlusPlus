@@ -11,6 +11,8 @@ import zlib
 ORIGINAL = "com.PigeonGames.Phigros"
 LABEL = "Phigros++"
 LABEL_ATTRIBUTE = 0x01010001  # android:label
+SHELL_ATTRIBUTE = 0x01010594  # android:shell
+ANDROID = "http://schemas.android.com/apk/res/android"
 # apksigner drops the source stamp, dropping it here lets a release be compared without its signature
 DROPPED = ("META-INF/BNDLTOOL.", "META-INF/MANIFEST.MF", "stamp-cert-sha256")
 
@@ -56,8 +58,9 @@ def manifest(data, package):
     while at < len(rest):
         kind, _, chunk = struct.unpack_from("<HHI", rest, at)
         if kind == 0x0180:  # resource ids of the first strings, the attribute names
-            ids = struct.unpack_from(f"<{(chunk - 8) // 4}I", rest, at + 8)
+            ids, idmap = struct.unpack_from(f"<{(chunk - 8) // 4}I", rest, at + 8), (at, at + chunk)
         elif kind == 0x0102 and strings[struct.unpack_from("<I", rest, at + 20)[0]] == "application":
+            inside = at + chunk
             first, step, attributes = struct.unpack_from("<HHH", rest, at + 24)
             for i in range(attributes):
                 attribute = at + 16 + first + i * step
@@ -65,6 +68,17 @@ def manifest(data, package):
                     strings.append(LABEL)
                     struct.pack_into("<IHBBI", rest, attribute + 8, len(strings) - 1, 8, 0, 0x03, len(strings) - 1)
         at += chunk
+
+    # <profileable android:shell="true"/> first in <application>, so simpleperf can sample the game. an attribute's
+    # name is its string's resource id, the map gets longer to reach the new string, other strings map to 0
+    strings += ["profileable", "shell"]
+    element, shell = len(strings) - 2, len(strings) - 1
+    profileable = struct.pack("<HHIIIIIHHHHHHIIIHBBI", 0x0102, 16, 56, 0, 0xFFFFFFFF, 0xFFFFFFFF, element, 20, 20, 1, 0,
+                              0, 0, strings.index(ANDROID), shell, 0xFFFFFFFF, 8, 0, 0x12, 0xFFFFFFFF)  # a boolean
+    profileable += struct.pack("<HHIIIII", 0x0103, 16, 24, 0, 0xFFFFFFFF, 0xFFFFFFFF, element)
+    ids = list(ids) + [0] * (shell - len(ids)) + [SHELL_ATTRIBUTE]
+    rest[inside:inside] = profileable
+    rest[idmap[0]:idmap[1]] = struct.pack(f"<HHI{len(ids)}I", 0x0180, 8, 8 + 4 * len(ids), *ids)
 
     offsets, body = [], b""
     for s in strings:

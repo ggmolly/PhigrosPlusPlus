@@ -44,6 +44,8 @@ done
   -DTHUNKS=1024 -DLUA_USE_POSIX -DOPUS_BUILD -DOPUS_EXPORT= -DUSE_ALLOCA -DHAVE_LRINTF -DHAVE_LRINT -DLUA_USE_DLOPEN -DNATIVE="$(cat "$SRC/NATIVE")" -DGAME="\"$GAME\"" \
   -I"$LUA" -I"$DOBBY/include" -I"$NACL" -I"$OPUS/include" -I"$OPUS/celt" -I"$OPUS/silk" -I"$OPUS/silk/float" -I"$OUT" \
   "${sources[@]}" "$SRC/phigrospp.c" "$SRC/sync.c" "$SRC/bundle.c" "$SRC/phc.c" "$SRC/media.c" "$SRC/thunks.S" "$OUT/dobby/libdobby.a" \
-  -o "$OUT/libphigrospp.so" -l:libc++_static.a -l:libc++abi.a -llog -lmediandk -ldl -lm \
-  -Wl,--gc-sections -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384 -Wl,--build-id=none -s
+  -o "$OUT/libphigrospp.sym.so" -l:libc++_static.a -l:libc++abi.a -llog -lmediandk -ldl -lm \
+  -Wl,--gc-sections -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384 -Wl,--build-id=none
+# the symbols stay in build/libphigrospp.sym.so, for make profile to name its functions
+"$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all -o "$OUT/libphigrospp.so" "$OUT/libphigrospp.sym.so"
 echo "built: $OUT/libphigrospp.so ($(stat -c %s "$OUT/libphigrospp.so") bytes)"
