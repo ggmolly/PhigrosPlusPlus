@@ -21,6 +21,7 @@
 
 #define IL2CPP_API(X)                                                \
   X(void *, domain_get, (void))                                      \
+  X(void *, get_corlib, (void))                                      \
   X(void *, thread_attach, (void *))                                 \
   X(void *, thread_current, (void))                                  \
   X(void **, domain_get_assemblies, (void *, size_t *))              \
@@ -102,7 +103,7 @@ enum {
   for (void *iter_ = NULL, *field; (field = il2cpp_class_get_fields(klass, &iter_));) \
     if (!(il2cpp_field_get_flags(field) & ATTR_STATIC))
 
-static void *domain, *string_class, *il2cpp_handle;
+static void *domain, *string_class, *single_class, *il2cpp_handle;
 static pthread_mutex_t lock;
 static lua_State *L;
 static char root[512];
@@ -568,6 +569,13 @@ static int l_bytes(lua_State *L) {
   memcpy((char *)array + ARRAY_DATA, s, n);
   push_object(L, array);
   return 1;
+}
+
+// a new float[] pushed on the stack, for C code that fills it (media.c)
+float *push_floats(lua_State *L, size_t n) {
+  void *array = il2cpp_array_new(single_class, n);
+  push_object(L, array);
+  return (float *)((char *)array + ARRAY_DATA);
 }
 
 static int l_unbytes(lua_State *L) {
@@ -1072,6 +1080,8 @@ static void load(void) {
   lua_pushcfunction(L, l_reload);
   lua_setfield(L, -2, "reload");
   open_sync(L);
+  open_phc(L);
+  open_media(L);
   Bundle bundle = open_bundle(L, root);
   lua_setglobal(L, "phigrospp");
 
@@ -1200,6 +1210,7 @@ static void start(void) {
   domain = il2cpp_domain_get();
   ensure_attached();
   string_class = il2cpp_object_get_class(il2cpp_string_new_len("", 0));
+  single_class = il2cpp_class_from_name(il2cpp_get_corlib(), "System", "Single");
 
   // per-frame methods on the main thread, in every scene: the first one found drives tick()
   static const char *ticks[][3] = {

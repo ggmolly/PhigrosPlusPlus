@@ -1,4 +1,4 @@
-// what phigrospp.c, sync.c and bundle.c share
+// what phigrospp.c and the other C files share
 #pragma once
 #include <android/log.h>
 #include <stdbool.h>
@@ -15,5 +15,8 @@ typedef struct {
 } Bundle;
 
 void open_sync(lua_State *L);
+void open_phc(lua_State *L);
+void open_media(lua_State *L);
+float *push_floats(lua_State *L, size_t n);
 Bundle open_bundle(lua_State *L, const char *root);
 bool next_file(Bundle *b, const char **path, size_t *path_size, const char **data, size_t *size);

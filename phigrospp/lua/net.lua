@@ -63,13 +63,13 @@ phigrospp.json = {
   decode = function(json) return (parse(json, 1)) end,
 }
 
--- done(status, body) runs on the main thread, status is 0 when the server couldn't be reached. returns the
--- UnityWebRequest, to follow or abort it
-function phigrospp.fetch(method, url, body, done)
+-- done(status, body) runs on the main thread, status is 0 when the server couldn't be reached. timeout is in seconds
+-- (30 when not given, 0 for none, for big files). returns the UnityWebRequest, to follow or abort it
+function phigrospp.fetch(method, url, body, done, timeout)
   local request = Networking.UnityWebRequest(url, method)
   request.downloadHandler = Networking.DownloadHandlerBuffer()
   if body then request.uploadHandler = Networking.UploadHandlerRaw(il2cpp.bytes(body)) end
-  request.timeout = 30
+  request.timeout = timeout or 30
   request:SendWebRequest()
   pending[#pending + 1] = { request = request, done = done }
   return request

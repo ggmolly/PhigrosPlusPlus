@@ -8,6 +8,7 @@ SRC=$MOD/phigrospp
 LUA=$MOD/vendor/lua # github.com/lua/lua at v5.4.7
 DOBBY=$MOD/vendor/dobby # github.com/jmpews/Dobby at b0176de574, later commits don't build
 NACL=$MOD/vendor/tweetnacl # tweetnacl.cr.yp.to 20140427
+OPUS=$MOD/vendor/opus # github.com/xiph/opus at v1.6.1, the linker drops all but the decoder
 OUT=$MOD/build
 mkdir -p "$OUT"
 
@@ -35,14 +36,14 @@ node -e '
 ' "$OUT/phigrospp.bundle" "$SRC/release.pub" > "$OUT/bundle.h"
 
 sources=()
-for file in "$LUA"/*.c; do
-  case $(basename "$file") in lua.c | ltests.c | onelua.c) ;; *) sources+=("$file") ;; esac
+for file in "$LUA"/*.c "$OPUS"/src/*.c "$OPUS"/celt/*.c "$OPUS"/silk/*.c; do
+  case $(basename "$file") in lua.c | ltests.c | onelua.c | *_demo.c | *_compare.c) ;; *) sources+=("$file") ;; esac
 done
 
 "$CC" -shared -fPIC -O2 -std=gnu11 -fvisibility=hidden -Wall -Wno-unused-function \
-  -DTHUNKS=1024 -DLUA_USE_POSIX -DLUA_USE_DLOPEN -DNATIVE="$(cat "$SRC/NATIVE")" -DGAME="\"$GAME\"" \
-  -I"$LUA" -I"$DOBBY/include" -I"$NACL" -I"$OUT" \
-  "${sources[@]}" "$SRC/phigrospp.c" "$SRC/sync.c" "$SRC/bundle.c" "$SRC/thunks.S" "$OUT/dobby/libdobby.a" \
-  -o "$OUT/libphigrospp.so" -l:libc++_static.a -l:libc++abi.a -llog -ldl -lm \
+  -DTHUNKS=1024 -DLUA_USE_POSIX -DOPUS_BUILD -DOPUS_EXPORT= -DUSE_ALLOCA -DHAVE_LRINTF -DHAVE_LRINT -DLUA_USE_DLOPEN -DNATIVE="$(cat "$SRC/NATIVE")" -DGAME="\"$GAME\"" \
+  -I"$LUA" -I"$DOBBY/include" -I"$NACL" -I"$OPUS/include" -I"$OPUS/celt" -I"$OPUS/silk" -I"$OPUS/silk/float" -I"$OUT" \
+  "${sources[@]}" "$SRC/phigrospp.c" "$SRC/sync.c" "$SRC/bundle.c" "$SRC/phc.c" "$SRC/media.c" "$SRC/thunks.S" "$OUT/dobby/libdobby.a" \
+  -o "$OUT/libphigrospp.so" -l:libc++_static.a -l:libc++abi.a -llog -lmediandk -ldl -lm \
   -Wl,--gc-sections -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384 -Wl,--build-id=none -s
 echo "built: $OUT/libphigrospp.so ($(stat -c %s "$OUT/libphigrospp.so") bytes)"

@@ -404,6 +404,10 @@ function phigrospp.read(path)
   return data
 end
 
+-- raw bytes as lowercase hex, and back
+function phigrospp.hex(s) return (s:gsub(".", function(c) return ("%02x"):format(c:byte()) end)) end
+function phigrospp.unhex(s) return (s:gsub("%x%x", function(h) return string.char(tonumber(h, 16)) end)) end
+
 function phigrospp.write(path, data)
   local handle = assert(io.open(path .. ".new", "wb"))
   handle:write(data)

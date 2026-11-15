@@ -1,5 +1,5 @@
-// what syncing with phigros.tools needs from C: randomness, sha-512, ed25519 keys and signatures, and x25519 for
-// pairing a device. all keys and hashes are lua strings of raw bytes
+// what syncing with phigros.tools needs from C: randomness, sha-512, ed25519 keys and signatures (also checking the
+// signed chart manifests), and x25519 for pairing a device. all keys and hashes are lua strings of raw bytes
 #include <stdlib.h>
 #include <string.h>
 #include <sys/syscall.h>
@@ -75,6 +75,21 @@ static int l_sign(lua_State *L) {
   return 1;
 }
 
+// verify(public key, message, signature) -> whether the signature is the key's
+static int l_verify(lua_State *L) {
+  const u8 *pk = check_bytes(L, 1, 32), *sig = check_bytes(L, 3, 64);
+  size_t n;
+  const char *m = luaL_checklstring(L, 2, &n);
+  u8 *signed_message = malloc(n + 64), *out = malloc(n + 64);
+  memcpy(signed_message, sig, 64);
+  memcpy(signed_message + 64, m, n);
+  u64 length;
+  lua_pushboolean(L, crypto_sign_open(out, &length, signed_message, n + 64, pk) == 0);
+  free(signed_message);
+  free(out);
+  return 1;
+}
+
 // x25519(secret) -> public key, x25519(secret, public) -> shared secret
 static int l_x25519(lua_State *L) {
   u8 out[32];
@@ -85,7 +100,8 @@ static int l_x25519(lua_State *L) {
 }
 
 static const luaL_Reg crypto_functions[] = {
-    {"random", l_random}, {"sha512", l_sha512}, {"keypair", l_keypair}, {"sign", l_sign}, {"x25519", l_x25519},
+    {"random", l_random}, {"sha512", l_sha512}, {"keypair", l_keypair}, {"sign", l_sign}, {"verify", l_verify},
+    {"x25519", l_x25519},
     {NULL, NULL},
 };
 

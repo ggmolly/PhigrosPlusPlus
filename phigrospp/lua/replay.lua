@@ -20,7 +20,7 @@ local armed, watchNext, resume -- the replay the next song start watches, and wh
 local whose -- the name#number of the player of the replay started from the song list
 local judged = {} -- the replays (by path) played through once since the game started, see on("song")
 local recorded, events, kept -- recording, and the play just kept until its result screen compares it with the record
-local playback, serving, hooks, simulating, enabled, cross, quit, leave -- watching
+local playback, serving, hooks, simulating, enabled, cross, quit -- watching
 
 local function folder(id, difficulty) return ("%s/%s.%s"):format(DIR, id, difficulty) end
 
@@ -43,8 +43,6 @@ function touches()
 end
 
 function replaying() return serving ~= nil end
-
-local function hex(s) return (s:gsub(".", function(c) return ("%02x"):format(c:byte()) end)) end
 
 local function getprop(name)
   local p = io.popen("getprop " .. name)
@@ -72,7 +70,7 @@ local function played()
       local found = IO.Directory.GetFiles(path, "*", recurse)
       for i = 0, #found - 1 do
         local data = IO.File.ReadAllBytes(found[i])
-        files[#files + 1] = found[i]:sub(#phigrospp.root + 2) .. ":" .. hex(phigrospp.crypto.sha512(il2cpp.unbytes(data)):sub(1, 4))
+        files[#files + 1] = found[i]:sub(#phigrospp.root + 2) .. ":" .. phigrospp.hex(phigrospp.crypto.sha512(il2cpp.unbytes(data)):sub(1, 4))
       end
     end
   end
@@ -334,12 +332,14 @@ local SAVING = {
   { CS.LevelOverControl, "HandleC9EvanescentUnlock" }, { CS.LevelOverControl, "HandleAboutTheUniverseUnlock" },
   { CS.LevelOverControl, "GetCollection" },
 }
-local blockers
+local blockers, watched
 
--- from a replay's start until the song list, its result screen saves nothing and its retry watches again
-local function protect()
+-- from a replay's or custom chart's start until the song list, its result screen saves nothing, and a replay's retry
+-- watches again
+local function protect(replay)
+  watched = replay
   if blockers then return end
-  blockers = { hook(CS.LevelOverControl, "Retry", { before = function() watchNext = playback and playback.path or watchNext end }) }
+  blockers = { hook(CS.LevelOverControl, "Retry", { before = function() if watched then watchNext = playback.path end end }) }
   for _, saving in ipairs(SAVING) do
     blockers[#blockers + 1] = hook(saving[1], saving[2], { skip = function() return true end })
   end
@@ -347,7 +347,7 @@ end
 
 -- the player of the replay watched or whose result shows (false when unknown), nil when none is
 function phigrospp.replay.by()
-  if blockers then return whose or false end
+  if blockers and watched then return whose or false end
 end
 
 local function unprotect()
@@ -355,7 +355,7 @@ local function unprotect()
   blockers = nil
 end
 
-on("song", function()
+on("song", function(chart)
   level, enabled = UE.Object.FindObjectOfType(CS.LevelControl), true
   local path = watchNext
   watchNext = nil
@@ -367,7 +367,7 @@ on("song", function()
     for _, frame in ipairs(frames) do seconds = seconds + frame.dt end
     local rate = #frames / seconds
     phigrospp.frameRate(rate)
-    protect()
+    protect(true)
     quitButton()
     local r = resume or {}
     mode, resume = "watch", nil
@@ -382,7 +382,7 @@ on("song", function()
     end
     print(("replay: watching %s, %d frames"):format(path, #frames))
   else
-    unprotect()
+    if phigrospp.charts.custom(chart.id) then protect(false) else unprotect() end
     mode, recorded, events = record() and "record" or nil, {}, {}
   end
 end)
@@ -402,7 +402,7 @@ on("update", function()
   if not p or p.ended then return end
   for i = 0, Input.touchCount - 1 do
     local touch = Input.GetTouch(i)
-    if touch.m_Phase == 0 and quit(touch.m_Position) then return leave() end -- Began
+    if touch.m_Phase == 0 and quit(touch.m_Position) then return phigrospp.leave() end -- Began
   end
   -- resumed from the game's pause menu, the song stands still until the music plays again after its 3, 2, 1
   if p.countdown then
@@ -476,15 +476,14 @@ end)
 -- counts too, its replay proves a record that was only imported until then
 hook(START, "<Start>g__UpdateRecord|18", {
   before = function(self)
-    if not kept then return end
-    if kept.score >= self.record.s then phigrospp.emit("best", kept.path) end
+    if kept and not blockers and kept.score >= self.record.s then phigrospp.emit("best", kept.path) end
     kept = nil
   end,
 })
 
--- back to the song list without a result screen. ProgressControl.Update only acts on a level break once the level is
--- over, and then goes to the next scene instead of the result screen
-function leave()
+-- back to the song list without a result screen (a replay quit, a reload in a custom song): ProgressControl.Update
+-- only acts on a level break once the level is over, then goes to the next scene instead of the result screen
+function phigrospp.leave()
   setJudging(true)
   level.judgeControl.stopJudge = true
   CS.GameInformation.nextScene = "SongSelector"
@@ -494,7 +493,7 @@ end
 
 -- a reload drops the replay's hooks and protection, so the song is left before it can count
 on("unload", function()
-  if mode == "watch" then leave() end
+  if mode == "watch" then phigrospp.leave() end
 end)
 
 on("resume", function()
