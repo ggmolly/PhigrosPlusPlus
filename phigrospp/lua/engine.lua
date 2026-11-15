@@ -118,8 +118,20 @@ function phigrospp.launch(package)
   return true
 end
 
--- asks android to run the screen at hz while nothing touches it (0 lets it choose again), through unity's surface
+-- the highest rate picked in android's settings, 0 when there's none
+local function peakRate()
+  local System = JNI.FindClass("android/provider/Settings$System")
+  local getFloat = JNI.GetStaticMethodID(System, "getFloat", "(Landroid/content/ContentResolver;Ljava/lang/String;F)F")
+  local resolver = call(activity(), "getContentResolver", "()Landroid/content/ContentResolver;")
+  return JNI.CallStaticFloatMethod(System, getFloat, { { l = resolver }, jstring("peak_refresh_rate"), { f = 0 } })
+end
+
+local rate, focused
+
+-- asks android to run the screen at hz while nothing touches it, through unity's surface. without hz it's the peak
+-- rate: hyperos keeps the renamed package at 60 Hz otherwise
 function phigrospp.frameRate(hz)
+  rate = hz
   local SurfaceView, ViewGroup = JNI.FindClass("android/view/SurfaceView"), JNI.FindClass("android/view/ViewGroup")
   local function find(view)
     if JNI.IsInstanceOf(view, SurfaceView) then return view end
@@ -131,8 +143,14 @@ function phigrospp.frameRate(hz)
   end
   local view = find(call(call(activity(), "getWindow", "()Landroid/view/Window;"), "getDecorView", "()Landroid/view/View;"))
   local surface = call(call(view, "getHolder", "()Landroid/view/SurfaceHolder;"), "getSurface", "()Landroid/view/Surface;")
-  call(surface, "setFrameRate", "(FI)V", { { f = hz }, { i = 0 } }, "Void") -- FRAME_RATE_COMPATIBILITY_DEFAULT
+  call(surface, "setFrameRate", "(FI)V", { { f = hz or peakRate() }, { i = 0 } }, "Void") -- FRAME_RATE_COMPATIBILITY_DEFAULT
 end
+
+-- the game gets a new surface each time it comes back, without the rate
+on("update", function()
+  if UE.Application.isFocused and not focused then phigrospp.frameRate(rate) end
+  focused = UE.Application.isFocused
+end)
 
 -- the app's own folder, which no other app can read on any android: for secrets (the phigros.tools key)
 function phigrospp.private()

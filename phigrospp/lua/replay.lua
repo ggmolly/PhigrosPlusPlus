@@ -504,7 +504,7 @@ end)
 on("leave", function()
   if mode == "watch" then
     watchNext = watchNext or playback.path
-    phigrospp.frameRate(0)
+    phigrospp.frameRate()
   end
   unserve()
   mode = nil
