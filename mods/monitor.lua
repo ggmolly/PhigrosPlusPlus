@@ -1,6 +1,9 @@
 -- a performance monitor over the game: frame times and their graph, what Phigros++ and each mod costs a frame, memory,
 -- threads, clocks and heat, to tell a slow game from a slow mod
 
+-- it reads /proc and /sys, which ios doesn't have
+if phigrospp.platform ~= "android" then return end
+
 local UE = CS.UnityEngine
 local GC = CS.System.GC
 

@@ -3,7 +3,9 @@
 
 local ui = phigrospp.ui
 local DOWNLOAD = "https://github.com/ggmolly/PhigrosPlusPlus/releases/latest/download/"
-local INSTALLER = "https://github.com/ggmolly/PhigrosPlusPlus-Installer/releases/latest"
+-- on ios phigros++ is patched into the game again from a computer (the wiki's Development page)
+local INSTALLER = phigrospp.platform == "ios" and "https://github.com/ggmolly/PhigrosPlusPlus/releases/latest"
+  or "https://github.com/ggmolly/PhigrosPlusPlus-Installer/releases/latest"
 local SKIPPED = phigrospp.root .. "/skipped" -- the last version the player skipped
 
 -- the version offered, the game of its app when it needs a newer app, and whether its popup waits for the chapter
@@ -58,8 +60,10 @@ end
 local function offer()
   prompt = nil
   if game then
-    if ui.confirm({ title = "Phigros++ " .. latest, no = "Skip", yes = "Open the installer",
-          message = ("This update for Phigros %s is installed with the Phigros++ Installer."):format(game) }) then
+    local ios = phigrospp.platform == "ios"
+    if ui.confirm({ title = "Phigros++ " .. latest, no = "Skip", yes = ios and "Open the release" or "Open the installer",
+          message = (ios and "This update for Phigros %s is patched into the game from a computer."
+            or "This update for Phigros %s is installed with the Phigros++ Installer."):format(game) }) then
       -- the installer that installed this app, else its download on the release page
       if not phigrospp.launch("sh.molly.phigrosplusplus.installer") then
         CS.UnityEngine.Application.OpenURL(INSTALLER)

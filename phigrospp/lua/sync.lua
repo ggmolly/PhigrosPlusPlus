@@ -564,7 +564,7 @@ uploadSave = setting("Upload my save", true, TAB, joined)
 uploadReplays = setting("Upload replays", true, TAB, joined)
 uploadPlays = setting("Upload play stats", true, TAB, joined)
 -- only on a device with a mobile network, a tablet on wi-fi has nothing to choose
-local cellular = phigrospp.feature("android.hardware.telephony")
+local cellular = phigrospp.platform == "ios" or phigrospp.feature("android.hardware.telephony")
 mobileData = setting("Upload over mobile data", true, TAB, function() return joined() and cellular end)
 unlisted = setting("Unlisted profile", false, TAB, joined)
 

@@ -1,8 +1,7 @@
-// phigros++: lua 5.4 mod host for Phigros, loaded with libmain.so through a DT_NEEDED
-// boot() waits for libil2cpp, start() hooks a per-frame method, mods run in tick() on the main thread
+// phigros++: lua 5.4 mod host for Phigros, loaded with the game (android.c and ios.c tell how)
+// found_il2cpp() waits for il2cpp_init, start() hooks a per-frame method, mods run in tick() on the main thread
 #include <dirent.h>
 #include <dlfcn.h>
-#include <link.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -13,7 +12,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "dobby.h"
 #include "lauxlib.h"
 #include "lua.h"
 #include "lualib.h"
@@ -744,7 +742,7 @@ static int target_for(void *code, void *method) {
     for (uint32_t i = 0; i < t->count; i++) t->abis[i] = classify(t->types[i] = il2cpp_method_get_param(method, i));
     t->ret_abi = classify(t->ret = il2cpp_method_get_return_type(method));
   }
-  if (DobbyHook(code, phigrospp_thunks + 8 * index, &phigrospp_originals[index]) != 0) return -1;
+  if (hook_code(code, phigrospp_thunks + 8 * index, &phigrospp_originals[index]) != 0) return -1;
   target_count++;
   return index;
 }
@@ -1072,7 +1070,9 @@ static int compare_names(const void *a, const void *b) { return strcmp(*(char *c
 // adds the mod a name in mods/ is: a folder, or a .lua file without its extension. names starting with _ or . are
 // skipped
 static int add_mod(char **names, int count, const char *name, size_t size) {
-  const char *dot = memrchr(name, '.', size);
+  const char *dot = NULL;
+  for (const char *c = name; c < name + size; c++)
+    if (*c == '.') dot = c;
   if (count == 256 || name[0] == '.' || name[0] == '_' || (dot && (name + size - dot != 4 || memcmp(dot, ".lua", 4))))
     return count;
   names[count] = strndup(name, dot ? (size_t)(dot - name) : size);
@@ -1114,6 +1114,7 @@ static void load(void) {
   lua_register(L, "now", l_now);
   lua_createtable(L, 0, 10);
   set_string(L, "root", root);
+  set_string(L, "platform", PLATFORM);
   lua_pushcfunction(L, l_reload);
   lua_setfield(L, -2, "reload");
   lua_pushcfunction(L, l_busy);
@@ -1121,6 +1122,7 @@ static void load(void) {
   open_sync(L);
   open_phc(L);
   open_media(L);
+  open_platform(L);
   Bundle bundle = open_bundle(L, root);
   lua_setglobal(L, "phigrospp");
 
@@ -1200,6 +1202,7 @@ static void tick(void) {
     load();
   }
   if (L) emit("update");
+  flush_code();
   leave_busy();
   pthread_mutex_unlock(&lock);
 }
@@ -1265,6 +1268,7 @@ static void start(void) {
       LOGE("couldn't hook %s.%s", ticks[i][1], ticks[i][2]);
       return;
     }
+    flush_code();
     pthread_t thread;
     pthread_create(&thread, NULL, watch_files, NULL);
     load_pending = 1;
@@ -1274,10 +1278,6 @@ static void start(void) {
   LOGE("no per-frame method found, mods won't load");
 }
 
-// the linker picks the namespace of a library from the caller address, so the hooks below
-// call the linker directly with the real caller instead of going through libdl
-static void *(*loader_dlopen)(const char *, int, const void *);
-static void *(*loader_android_dlopen_ext)(const char *, int, const void *, const void *);
 static int (*original_il2cpp_init)(const char *);
 
 static int hooked_il2cpp_init(const char *domain_name) {
@@ -1286,77 +1286,12 @@ static int hooked_il2cpp_init(const char *domain_name) {
   return result;
 }
 
-static void loaded(const char *filename, void *handle) {
-  size_t n = filename ? strlen(filename) : 0;
-  if (!handle || il2cpp_handle || n < 12 || strcmp(filename + n - 12, "libil2cpp.so")) return;
+void found_il2cpp(void *handle) {
   il2cpp_handle = handle;
   void *init = dlsym(handle, "il2cpp_init");
-  if (!init || DobbyHook(init, (void *)hooked_il2cpp_init, (void **)&original_il2cpp_init) != 0)
+  if (!init || hook_code(init, (void *)hooked_il2cpp_init, (void **)&original_il2cpp_init) != 0)
     LOGE("couldn't hook il2cpp_init");
-}
-
-static void *hooked_dlopen(const char *filename, int flags) {
-  void *handle = loader_dlopen(filename, flags, __builtin_return_address(0));
-  loaded(filename, handle);
-  return handle;
-}
-
-static void *hooked_android_dlopen_ext(const char *filename, int flags, const void *info) {
-  void *handle = loader_android_dlopen_ext(filename, flags, info, __builtin_return_address(0));
-  loaded(filename, handle);
-  return handle;
-}
-
-typedef struct {
-  const char *symbol;
-  void *address;
-} Import;
-
-// dlsym can't see the linker's __loader_* functions from an app, but libdl imports them: read its
-// already bound GOT entries (bionic binds at load and doesn't relocate .dynamic)
-static int find_import(struct dl_phdr_info *info, size_t size, void *data) {
-  (void)size;
-  Import *import = data;
-  size_t n = info->dlpi_name ? strlen(info->dlpi_name) : 0;
-  if (n < 9 || strcmp(info->dlpi_name + n - 9, "/libdl.so")) return 0;
-  const ElfW(Dyn) *dynamic = NULL;
-  const ElfW(Sym) *symbols = NULL;
-  const ElfW(Rela) *relocations = NULL;
-  const char *strings = NULL;
-  size_t size_ = 0;
-  for (int i = 0; i < info->dlpi_phnum; i++)
-    if (info->dlpi_phdr[i].p_type == PT_DYNAMIC) dynamic = (const void *)(info->dlpi_addr + info->dlpi_phdr[i].p_vaddr);
-  for (const ElfW(Dyn) *d = dynamic; d && d->d_tag != DT_NULL; d++) {
-    const void *at = (const void *)(info->dlpi_addr + d->d_un.d_ptr);
-    if (d->d_tag == DT_SYMTAB) symbols = at;
-    else if (d->d_tag == DT_STRTAB) strings = at;
-    else if (d->d_tag == DT_JMPREL) relocations = at;
-    else if (d->d_tag == DT_PLTRELSZ) size_ = d->d_un.d_val;
-  }
-  for (size_t i = 0; symbols && strings && relocations && i < size_ / sizeof *relocations; i++)
-    if (!strcmp(strings + symbols[ELF64_R_SYM(relocations[i].r_info)].st_name, import->symbol)) {
-      import->address = *(void **)(info->dlpi_addr + relocations[i].r_offset);
-      return 1;
-    }
-  return 0;
-}
-
-static void *libdl_import(const char *symbol) {
-  Import import = {symbol, NULL};
-  dl_iterate_phdr(find_import, &import);
-  return import.address;
-}
-
-static void find_root(void) {
-  char package[256] = "sh.molly.phigrosplusplus";
-  FILE *f = fopen("/proc/self/cmdline", "r");
-  if (f) {
-    package[fread(package, 1, sizeof package - 1, f)] = 0;
-    fclose(f);
-  }
-  char *process = strchr(package, ':');
-  if (process) *process = 0;
-  snprintf(root, sizeof root, "/sdcard/Android/data/%s/files/phigros++", package);
+  flush_code();
 }
 
 __attribute__((constructor)) static void boot(void) {
@@ -1364,11 +1299,5 @@ __attribute__((constructor)) static void boot(void) {
   pthread_mutexattr_init(&attr);
   pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
   pthread_mutex_init(&lock, &attr);
-  find_root();
-  loader_dlopen = libdl_import("__loader_dlopen");
-  loader_android_dlopen_ext = libdl_import("__loader_android_dlopen_ext");
-  if (!loader_dlopen || !loader_android_dlopen_ext ||
-      DobbyHook(dlsym(RTLD_DEFAULT, "dlopen"), (void *)hooked_dlopen, NULL) != 0 ||
-      DobbyHook(dlsym(RTLD_DEFAULT, "android_dlopen_ext"), (void *)hooked_android_dlopen_ext, NULL) != 0)
-    LOGE("couldn't hook dlopen, Phigros++ is off");
+  boot_platform(root, sizeof root);
 }
