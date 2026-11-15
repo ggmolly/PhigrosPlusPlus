@@ -14,7 +14,7 @@ SPLIT := out/split_config.arm64_v8a.apk
 all: apk
 
 lib: $(LIB)
-$(LIB): $(wildcard phigrospp/* phigrospp/lua/* mods/* mods/*/* vendor/lua-5.4.7/src/* vendor/tweetnacl/*) \
+$(LIB): $(wildcard phigrospp/* phigrospp/lua/* mods/* mods/*/* vendor/lua/* vendor/tweetnacl/*) \
 		scripts/build-lib.sh scripts/bundle.sh $(APKS)/base.apk
 	scripts/build-lib.sh $(APKS)
 

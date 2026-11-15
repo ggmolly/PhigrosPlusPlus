@@ -1,3 +1,9 @@
 [submodule "vendor/dobby"]
 	path = vendor/dobby
 	url = https://github.com/jmpews/Dobby.git
+[submodule "vendor/opus"]
+	path = vendor/opus
+	url = https://github.com/xiph/opus.git
+[submodule "vendor/lua"]
+	path = vendor/lua
+	url = https://github.com/lua/lua.git
