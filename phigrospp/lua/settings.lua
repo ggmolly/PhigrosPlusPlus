@@ -396,14 +396,6 @@ local function addTab(screen, name, index)
   click.m_PersistentCalls.m_Calls._items[0].m_Arguments.m_IntArgument = index
   click.m_CallsDirty = true
 
-  -- the list takes the place of Gameplay's: the last page spans the whole width, the rows going left with the slant
-  -- leave it at the bottom
-  local gameplay = phigrospp.find(source.transform.parent, "Play")
-  for _, path in ipairs({ "Scroll View", "Scroll View/Viewport", "Scroll View/Viewport/Content", "Scroll View/Viewport/Content/Items" }) do
-    local to, from = phigrospp.find(page.transform, path), phigrospp.find(gameplay, path)
-    to.anchorMin, to.anchorMax, to.pivot = from.anchorMin, from.anchorMax, from.pivot
-    to.sizeDelta, to.anchoredPosition = from.sizeDelta, from.anchoredPosition
-  end
   local content = page.transform:Find("Scroll View/Viewport/Content")
   local items = content:Find("Items")
   for i = items.childCount - 1, 0, -1 do UE.Object.Destroy(items:GetChild(i).gameObject) end
