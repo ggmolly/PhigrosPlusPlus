@@ -305,6 +305,8 @@ local opImplicit
 
 il2cpp = {
   string = raw.string,
+  -- gc(false) stops the game's garbage collector, gc(true) starts it again with a collection
+  gc = raw.gc,
   -- a byte[] of a lua string, and back
   bytes = function(s) return raw.bytes(classes["System.Byte"], s) end,
   unbytes = raw.unbytes,

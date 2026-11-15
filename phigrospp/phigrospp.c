@@ -75,6 +75,9 @@
   X(void, gchandle_free, (uintptr_t))                                \
   X(void, format_exception, (void *, char *, int))                   \
   X(void, gc_wbarrier_set_field, (void *, void **, void *))          \
+  X(void, gc_disable, (void))                                        \
+  X(void, gc_enable, (void))                                         \
+  X(void, gc_collect, (int))                                         \
   X(void, free, (void *))
 
 #define DECLARE(ret, name, args) static ret(*il2cpp_##name) args;
@@ -964,6 +967,17 @@ static int l_unhook(lua_State *L) {
   return 0;
 }
 
+// gc(false) stops the game's garbage collector, gc(true) starts it again and collects what piled up meanwhile
+static int l_gc(lua_State *L) {
+  if (lua_toboolean(L, 1)) {
+    il2cpp_gc_enable();
+    il2cpp_gc_collect(0);
+  } else {
+    il2cpp_gc_disable();
+  }
+  return 0;
+}
+
 static int l_print(lua_State *L) {
   int n = lua_gettop(L);  // before luaL_buffinit, which pushes a placeholder
   luaL_Buffer b;
@@ -997,7 +1011,7 @@ static const luaL_Reg raw_functions[] = {
     {"invoke", l_invoke}, {"getfield", l_getfield}, {"setfield", l_setfield}, {"new", l_new},
     {"classof", l_classof}, {"typeof", l_typeof}, {"assignable", l_assignable}, {"string", l_string},
     {"alen", l_alen}, {"aget", l_aget}, {"aset", l_aset}, {"bytes", l_bytes}, {"unbytes", l_unbytes},
-    {"hook", l_hook}, {"unhook", l_unhook}, {NULL, NULL},
+    {"hook", l_hook}, {"unhook", l_unhook}, {"gc", l_gc}, {NULL, NULL},
 };
 
 // runs the function under the top `nargs` values, logging any error

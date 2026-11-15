@@ -128,3 +128,21 @@ hook(CS.ProgressControl, "Play", {
 })
 
 hook(CS.ProgressControl, "LevelOver", { before = function() emit("finish", stats()) end })
+
+-- the game's garbage collector stops it for 100 to 250 ms when it runs, every few seconds, and lua's for up to 40 ms:
+-- while a song plays both wait for it to end or pause, the heaps grow by up to 20 MB a minute meanwhile
+local collecting = true
+local function collect(on)
+  if collecting ~= on then
+    il2cpp.gc(on)
+    collectgarbage(on and "restart" or "stop")
+    if on then collectgarbage() end
+  end
+  collecting = on
+end
+on("song", function() collect(false) end)
+on("pause", function() collect(true) end)
+on("resume", function() collect(false) end)
+on("leave", function() collect(true) end)
+-- the collector is the game's, it outlives a reload
+on("unload", function() collect(true) end)
