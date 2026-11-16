@@ -44,13 +44,6 @@ end
 
 function replaying() return serving ~= nil end
 
-local function getprop(name)
-  local p = io.popen("getprop " .. name)
-  local value = p:read("l")
-  p:close()
-  return value
-end
-
 -- what every replay was played with, read once: see replayfile.lua's header
 local environment
 
@@ -70,9 +63,7 @@ local function played()
   end
   table.sort(files)
   environment = { game = CS.CloudSaveSummary.FromLocalSave().GameVersion, phigrospp = phigrospp.version,
-    -- ios has no getprop, its version ("iOS 17.5") stands in for android's
-    device = UE.SystemInfo.deviceModel,
-    android = phigrospp.platform == "android" and getprop("ro.build.version.release") or UE.SystemInfo.operatingSystem,
+    device = UE.SystemInfo.deviceModel, os = UE.SystemInfo.operatingSystem,
     refresh = phigrospp.refreshRate(), fps = UE.Application.targetFrameRate,
     files = table.concat(files, ","), dpi = Screen.dpi }
   return environment
