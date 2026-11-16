@@ -1,5 +1,6 @@
-// a bundle is a "phigros++ <native> <version> <game>..." line, then "<path>\n<size>\n<bytes>" per file. a downloaded
-// one (phigros++/bundle) runs only signed by the release key, for this app and game, and newer than the built-in one
+// a bundle is a "phigros++ <native> <version> <platform>:<game>..." line, then "<path>\n<size>\n<bytes>" per file.
+// a downloaded one (phigros++/bundle) runs only signed by the release key, for this app and game, and newer than
+// the built-in one
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,7 +36,7 @@ static const char *header(Bundle *b, char version[32], bool any) {
   if (any) return NULL;
   if (atoi(native) != NATIVE) return "made for another app";
   for (char *game; (game = strtok_r(NULL, " ", &save));)
-    if (!strcmp(game, GAME)) return NULL;
+    if (!strcmp(game, PLATFORM ":" GAME)) return NULL;
   return "made for other versions of the game";
 }
 

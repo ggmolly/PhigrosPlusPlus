@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # writes build/phigrospp.bundle (see bundle.c): the core lua in load order, the recovery words and the built-in mods,
-# behind a "phigros++ <native> <version> <games>" line. build-lib.sh and release.sh run this
+# behind a "phigros++ <native> <version> <platform>:<game>..." line. build-lib.sh and release.sh run this
 set -euo pipefail
 MOD=$(dirname "$(dirname "$(realpath "$0")")")
 SRC=$MOD/phigrospp
