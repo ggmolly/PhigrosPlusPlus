@@ -48,7 +48,7 @@ if [ ! -f "$OUT/dobby-$PLATFORM/libdobby.a" ]; then
 fi
 
 # downloaded bundles only run on the game they list, so the one this library ships with must be listed
-grep -qx "$GAME" "$SRC/GAMES" || { echo "add the game version $GAME to phigrospp/GAMES" >&2; exit 1; }
+grep -qx "$PLATFORM:$GAME" "$SRC/GAMES" || { echo "add $PLATFORM:$GAME to phigrospp/GAMES" >&2; exit 1; }
 
 "$MOD/scripts/bundle.sh"
 node -e '

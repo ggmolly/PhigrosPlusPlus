@@ -1,5 +1,5 @@
 -- updates from github releases, offered in a popup on the chapter screen (see the wiki's Updates page). a release's
--- phigrospp.version is its bundle's first line, the newest game last
+-- phigrospp.version is its bundle's first line, with each platform's games as "android:4.0.1.2", the newest last
 
 local ui = phigrospp.ui
 local DOWNLOAD = "https://github.com/ggmolly/PhigrosPlusPlus/releases/latest/download/"
@@ -87,11 +87,15 @@ phigrospp.fetch("GET", DOWNLOAD .. "phigrospp.version", nil, function(status, li
   if status ~= 200 then return print(("update: no release found (%d)"):format(status)) end
   local native, version, games = line:match("^phigros%+%+ (%d+) (%S+) (.-)%s*$")
   native = tonumber(native)
-  local newest = games:match("(%S+)$")
-  local runs = native == phigrospp.native and (" " .. games .. " "):find(" " .. phigrospp.game .. " ", 1, true)
+  local newest, runs
+  for platform, listed in games:gmatch("(%a+):(%S+)") do
+    if platform == phigrospp.platform then newest, runs = listed, runs or listed == phigrospp.game end
+  end
+  runs = runs and native == phigrospp.native
   if runs and number(version) > number(phigrospp.version) then
     latest = version
-  elseif number(version) > number(phigrospp.app) and (native ~= phigrospp.native or newest ~= phigrospp.game) then
+  elseif newest and number(version) > number(phigrospp.app)
+    and (native ~= phigrospp.native or newest ~= phigrospp.game) then
     latest, game = version, newest
   else
     return
