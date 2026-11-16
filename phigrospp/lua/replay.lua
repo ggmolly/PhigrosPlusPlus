@@ -51,12 +51,6 @@ local function getprop(name)
   return value
 end
 
--- the screen's refresh rate (Hz)
-local function refresh()
-  local rate = Screen.currentResolution.m_RefreshRate
-  return rate.numerator / rate.denominator
-end
-
 -- what every replay was played with, read once: see replayfile.lua's header
 local environment
 
@@ -79,7 +73,7 @@ local function played()
     -- ios has no getprop, its version ("iOS 17.5") stands in for android's
     device = UE.SystemInfo.deviceModel,
     android = phigrospp.platform == "android" and getprop("ro.build.version.release") or UE.SystemInfo.operatingSystem,
-    refresh = refresh(), fps = UE.Application.targetFrameRate,
+    refresh = phigrospp.refreshRate(), fps = UE.Application.targetFrameRate,
     files = table.concat(files, ","), dpi = Screen.dpi }
   return environment
 end

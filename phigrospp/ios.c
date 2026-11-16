@@ -180,7 +180,16 @@ static int l_thermal(lua_State *L) {
   return 1;
 }
 
+// refreshRate() -> the screen's top rate (Hz), unity's Screen.currentResolution is stripped on ios
+static int l_refresh_rate(lua_State *L) {
+  id screen = ((id(*)(Class, SEL))objc_msgSend)(objc_getClass("UIScreen"), sel_registerName("mainScreen"));
+  lua_pushinteger(L, ((long (*)(id, SEL))objc_msgSend)(screen, sel_registerName("maximumFramesPerSecond")));
+  return 1;
+}
+
 void open_platform(lua_State *L) {
   lua_pushcfunction(L, l_thermal);
   lua_setfield(L, -2, "thermal");
+  lua_pushcfunction(L, l_refresh_rate);
+  lua_setfield(L, -2, "refreshRate");
 }

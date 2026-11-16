@@ -1,4 +1,4 @@
--- the ios side of the platform api (android.lua has the same functions). phigrospp.thermal comes from ios.c
+-- the ios side of the platform api (android.lua has the same functions). phigrospp.thermal and refreshRate come from ios.c
 if phigrospp.platform ~= "ios" then return end
 
 local UE = CS.UnityEngine
@@ -37,11 +37,6 @@ function phigrospp.launch() return false end
 
 -- unity paces the frames itself on ios (CADisableMinimumFrameDurationOnPhone, set by patch_ipa.py, unlocks 120 Hz)
 function phigrospp.frameRate() end
-
-function phigrospp.refreshRate()
-  local rate = UE.Screen.currentResolution.m_RefreshRate
-  return rate.numerator / rate.denominator
-end
 
 -- Library/ is the app's own, unlike Documents/ which the Files app shows
 function phigrospp.private() return os.getenv("HOME") .. "/Library" end
