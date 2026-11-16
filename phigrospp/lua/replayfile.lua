@@ -11,15 +11,15 @@
 
 local MAGIC, VERSION = "PIGEON", 6
 -- the header, in order: the chart, the screen it was played on, when, the result (the picker reads only this), then
--- what it was played with: the game (its update count), phigros++, the device, its android version and refresh rate,
--- the target frame rate, the song's offset in seconds, every mods/ and core/ file with the start of its sha-512, and
--- what the game's judgement depends on: the screen's dpi (flicks), mirror mode and challenge mode (1 when on), the
--- modifiers it was played with (their bits, modifiers.lua) and the seed Random shuffled the chart from
+-- what it was played with: the game (its update count), phigros++, the device, its system ("iOS 17.5"), its refresh
+-- rate, the target frame rate, the song's offset in seconds, every mods/ and core/ file with the start of its
+-- sha-512, and what the game's judgement depends on: the screen's dpi (flicks), mirror and challenge mode (1 when on),
+-- the modifiers it was played with (their bits, modifiers.lua) and the seed Random shuffled the chart from
 local FIELDS = {
   { "version", "B" }, { "id", "s1" }, { "difficulty", "s1" }, { "width", "I2" }, { "height", "I2" }, { "date", "i8" },
   { "score", "i4" }, { "accuracy", "f" }, { "maxcombo", "I2" }, { "perfect", "I2" }, { "good", "I2" },
   { "bad", "I2" }, { "miss", "I2" }, { "early", "I2" }, { "late", "I2" }, { "duration", "f" },
-  { "game", "I4" }, { "phigrospp", "s1" }, { "device", "s1" }, { "android", "s1" }, { "refresh", "d" },
+  { "game", "I4" }, { "phigrospp", "s1" }, { "device", "s1" }, { "os", "s1" }, { "refresh", "d" },
   { "fps", "i2" }, { "offset", "f" }, { "files", "s2" }, { "dpi", "f" }, { "mirror", "B" }, { "challenge", "B" },
   { "mods", "I4" }, { "seed", "I4" },
 }
