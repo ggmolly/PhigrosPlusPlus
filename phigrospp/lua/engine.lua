@@ -170,6 +170,15 @@ function phigrospp.private()
   return JNI.GetStringUTFChars(call(dir, "getAbsolutePath", "()Ljava/lang/String;"))
 end
 
+-- the link the app was opened with (phigrospp://...), given once
+function phigrospp.link()
+  local intent = call(activity(), "getIntent", "()Landroid/content/Intent;")
+  local link = call(intent, "getDataString", "()Ljava/lang/String;")
+  if link == 0 then return nil end -- a null object
+  call(intent, "setData", "(Landroid/net/Uri;)Landroid/content/Intent;", { { l = 0 } })
+  return JNI.GetStringUTFChars(link)
+end
+
 -- a path relative to the file of the mod calling an api function `level` frames up
 function phigrospp.resolve(path, level)
   if path:sub(1, 1) == "/" then return path end
@@ -193,11 +202,17 @@ end)
 -- image("logo.png") is a Sprite of a png or jpg next to the calling mod's file
 local images = {}
 
+-- a Texture2D of a png's or jpg's bytes
+function phigrospp.texture(bytes)
+  local texture = phigrospp.asset(UE.Texture2D(2, 2))
+  UE.ImageConversion.LoadImage(texture, il2cpp.bytes(bytes))
+  return texture
+end
+
 function image(path)
   path = phigrospp.resolve(path, 2)
   if not images[path] then
-    local texture = phigrospp.asset(UE.Texture2D(2, 2))
-    UE.ImageConversion.LoadImage(texture, il2cpp.bytes(phigrospp.read(path)))
+    local texture = phigrospp.texture(phigrospp.read(path))
     images[path] = phigrospp.asset(UE.Sprite.Create(texture, { 0, 0, texture.width, texture.height }, { 0.5, 0.5 }))
   end
   return images[path]
@@ -222,9 +237,45 @@ end
 
 -- the open dialog's bar, redrawn every frame, and what closes it
 local drawBar, closeDialog
+-- the panels, lists and videos of phigrospp.ui that are on screen
+local panels, lists, videos = {}, {}, {}
+local SLIDE = 0.35 -- seconds a panel takes to come and go
+
+-- calls each(item) for the ones whose object lives, an item whose object died with its scene or each() says is done
+-- (true) is forgotten
+local function live(items, each)
+  for i = #items, 1, -1 do
+    if not il2cpp.alive(items[i].transform) or each(items[i]) then table.remove(items, i) end
+  end
+end
 
 on("update", function()
   if drawBar then drawBar() end
+  live(panels, function(p)
+    local f = math.min(1, (now() - p.start) / SLIDE)
+    f = f * f * (3 - 2 * f)
+    local shown = p.closing and 1 - f or f
+    p.group.alpha, p.group.blocksRaycasts = shown, not p.closing
+    p.transform.anchoredPosition = { 160 * (1 - shown), 0 }
+    if not p.closing or f < 1 then return false end
+    UE.Object.Destroy(p.transform.gameObject)
+    if p.closed then p.closed() end
+    return true
+  end)
+  -- the rows slide sideways as they scroll, along the slant, like the game's lists. they're centred on the middle of
+  -- the list: rows above it lean right and below it left
+  live(lists, function(l)
+    if not l.width then return true end -- an upright one stays where it is
+    local view, slope = l.transform.rect, CS.SettingItemsManager.InverseSlope
+    l.rows.anchoredPosition = { (view.m_Width - l.width) / 2 + (view.m_Height / 2 + l.content.anchoredPosition.y) * slope, -16 }
+  end)
+  live(videos, function(v)
+    if not v.player.isPrepared then return false end
+    v.view.color = { 1, 1, 1, 1 }
+    phigrospp.ui.fit(v.view, v.player.texture)
+    v.player:Play()
+    return true
+  end)
 end)
 
 -- the Phigros++ screens (replay player and picker): canvases over everything, pieces placed in screen pixels from the
@@ -270,6 +321,72 @@ phigrospp.ui = {
     return clone
   end,
   danger = { 0.9, 0.27, 0.33, 1 }, -- the red of buttons that delete
+  -- a bar slanted like the game's, its bottom further left, placed from its top left corner
+  bar = function(parent, name, pos, size, colour)
+    local shape = phigrospp.ui.place(parent, name, CS.Lean.Gui.LeanPolygon, pos, size, { 0, 1 })
+    local lean = -size[2] * CS.SettingItemsManager.InverseSlope
+    for _, point in ipairs({ { 0, 0, 0, 1 }, { 0, 0, 1, 1 }, { lean, 0, 1, 0 }, { lean, 0, 0, 0 } }) do
+      shape.Points:Add(point) -- offset x, y from the anchor x, y in the shape
+    end
+    shape.Blur, shape.color = 0.5, colour
+    shape:SetVerticesDirty()
+    return shape
+  end,
+  -- a screen over a canvas, sliding in over a shade that catches the taps: { transform =, close = }. closed() runs
+  -- once it slid out and is gone. shade is how dark it is, for a screen whose texts go over what's under
+  panel = function(canvas, name, closed, shade)
+    local root = UE.GameObject(name):AddComponent(UE.RectTransform)
+    root:SetParent(canvas, false)
+    root.anchorMin, root.anchorMax, root.sizeDelta = { 0, 0 }, { 1, 1 }, { 0, 0 }
+    local p = { transform = root, group = root.gameObject:AddComponent(UE.CanvasGroup), start = now(), closed = closed }
+    phigrospp.ui.rect(root, name .. "-shade", { 0, 0 }, { canvas.rect.m_Width, canvas.rect.m_Height },
+      { 0, 0, 0, shade or 0.85 }, { 0, 0 }).raycastTarget = true
+    function p.close()
+      if not p.closing then p.closing, p.start = true, now() end
+    end
+    panels[#panels + 1] = p
+    return p
+  end,
+  -- a list scrolling like the game's: { transform = its view, content =, rows = }. rows `width` wide go in rows from
+  -- its top (a bar at { -y * slope, -y }), and content.sizeDelta's y is the height they take. without a width it's
+  -- upright: what's put in rows scrolls straight up and down
+  list = function(parent, name, pos, size, width)
+    local view = phigrospp.ui.rect(parent, name, pos, size, { 0, 0, 0, 0 }, { 0, 0 })
+    view.raycastTarget = true -- drags between rows scroll too
+    view.gameObject:AddComponent(UE.UI.RectMask2D)
+    local function stretched(child, under)
+      local t = UE.GameObject(child):AddComponent(UE.RectTransform)
+      t:SetParent(under, false)
+      t.anchorMin, t.anchorMax, t.pivot, t.sizeDelta = { 0, 1 }, { 1, 1 }, { 0, 1 }, { 0, 0 }
+      return t
+    end
+    local l = { transform = view.transform, width = width }
+    l.content = stretched("Content", l.transform)
+    l.rows = stretched("Rows", l.content)
+    local scroll = view.gameObject:AddComponent(UE.UI.ScrollRect)
+    scroll.viewport, scroll.content, scroll.horizontal = l.transform, l.content, false
+    lists[#lists + 1] = l
+    return l
+  end,
+  -- shows a texture in a RawImage, which shrinks to the texture's shape inside the box it had
+  fit = function(view, texture)
+    local box = view.transform.sizeDelta
+    local scale = math.min(box.x / texture.width, box.y / texture.height)
+    view.texture, view.transform.sizeDelta = texture, { texture.width * scale, texture.height * scale }
+  end,
+  -- a video of a url or a file, looping without sound in a RawImage that shows poster (a Texture, if any) until it
+  -- plays. it keeps its shape inside size
+  video = function(parent, name, pos, size, url, poster, pivot)
+    local view = phigrospp.ui.place(parent, name, UE.UI.RawImage, pos, size, pivot)
+    view.color = { 1, 1, 1, poster and 1 or 0.08 }
+    if poster then phigrospp.ui.fit(view, poster) end
+    local player = view.gameObject:AddComponent(UE.Video.VideoPlayer)
+    -- APIOnly: the frames are only drawn to player.texture
+    player.playOnAwake, player.renderMode, player.isLooping, player.url = false, 4, true, url
+    player:Prepare()
+    videos[#videos + 1] = { transform = view.transform, view = view, player = player }
+    return view
+  end,
   -- a dialog made from the game's own confirmation popup (the cloud save one): { title =, message =, yes =,
   -- danger = true for a red yes, no = false for yes alone (yes = false for no alone), grid = { cells =, columns = }
   -- texts in aligned columns under the message (one column centered), input = a text box's placeholder, its text
