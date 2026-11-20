@@ -25,8 +25,9 @@ export PHIGROSPP_SIGNING_KEY
 mkdir -p "$MOD/out"
 cp "$MOD/build/libphigrospp.so" "$MOD/out/libphigrospp.so"
 # the bundle, its first line, and for the installer (patcher/) a manifest of what it patches the game with:
-# "phigros++ installer 1", then "version", "native", "games" (android's, the installer's platform) and
-# "lib <sha256> <size>" lines
+# "phigros++ installer 2", then "version", "native", "games" (android's, the installer's platform) and
+# "lib <sha256> <size>" lines. the number is what the release needs of the installer, an older one asks to be updated:
+# 2 is an app opened by phigrospp:// links
 node -e '
   const crypto = require("crypto"), fs = require("fs");
   const [bundle, trusted, out] = process.argv.slice(1);
@@ -40,7 +41,7 @@ node -e '
   const [, native, version, ...games] = message.subarray(0, message.indexOf(10)).toString().split(" ");
   const lib = fs.readFileSync(`${out}/libphigrospp.so`);
   const android = games.filter((game) => game.startsWith("android:")).map((game) => game.slice("android:".length));
-  const manifest = ["phigros++ installer 1", `version ${version}`, `native ${native}`, `games ${android.join(" ")}`,
+  const manifest = ["phigros++ installer 2", `version ${version}`, `native ${native}`, `games ${android.join(" ")}`,
     `lib ${crypto.createHash("sha256").update(lib).digest("hex")} ${lib.length}`, ""].join("\n");
   fs.writeFileSync(`${out}/phigrospp.bundle`, sign(message));
   fs.writeFileSync(`${out}/phigrospp.version`, message.subarray(0, message.indexOf(10) + 1));

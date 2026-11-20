@@ -40,3 +40,6 @@ function phigrospp.frameRate() end
 
 -- Library/ is the app's own, unlike Documents/ which the Files app shows
 function phigrospp.private() return os.getenv("HOME") .. "/Library" end
+
+-- no link opens the app on ios yet: unity's Application.absoluteURL isn't in this game, a mod's link is pasted instead
+function phigrospp.link() end

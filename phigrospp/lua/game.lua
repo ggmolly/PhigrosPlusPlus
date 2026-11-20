@@ -4,6 +4,7 @@ local emit = phigrospp.emit
 local LANGUAGES = { [40] = "chinese", [41] = "chineseTraditional", [10] = "english", [22] = "japanese", [23] = "korean" }
 
 local chart, scorer, paused
+local lines -- the level's judge lines by index, looked for when a hit needs one
 
 function language() return LANGUAGES[CS.MultiLanguageManager.GetCurrentLanguage()] end
 
@@ -96,7 +97,7 @@ hook(CS.LevelControl, "SortForAllNoteWithTime", {
     chart = { id = info.songsId, name = info.songsName, difficulty = info.songsLevel, level = info.songsDifficulty,
       composer = info.composer, charter = info.charter, illustrator = info.illustrator, mirror = info.mirror,
       notes = level.levelInformation.numOfNotes }
-    scorer, paused = level.scoreControl, false
+    scorer, paused, lines = level.scoreControl, false, nil
     emit("song", chart)
   end,
 })
@@ -109,12 +110,39 @@ hook(CS.LevelControl, "OnDestroy", {
   end,
 })
 
--- offset is in ms, positive when late, nil for misses, drags and flicks
+local KINDS = { "tap", "drag", "hold", "flick" } -- by a chart note's type
+
+-- the chart's note a judgement is about and its line, from the note's code: its line (millions), its side of the
+-- line (100000 for below) and its place in that side's notes (tens)
+local function judged(code)
+  if not lines then
+    local all = CS.UnityEngine.Object.FindObjectsOfType(CS.JudgeLineControl)
+    lines = {}
+    for i = 0, #all - 1 do lines[all[i].index] = all[i] end
+  end
+  code = math.floor(code)
+  local line = lines[code // 1000000]
+  local notes = code % 1000000 >= 100000 and line.notesBelow or line.notesAbove
+  return notes:get_Item(code % 100000 // 10), line
+end
+
+-- where a hit is on screen, in pixels: nothing while nothing is drawn (a replay being sought). the game says where a
+-- perfect or a good is, a miss or a bad is where its note sits on its line
+local function where(note, line, at)
+  local camera = CS.UnityEngine.Camera.main
+  if not camera then return nil end
+  local point = camera:WorldToScreenPoint(at or line.transform:TransformPoint({ note.positionX, 0, 0 }))
+  return point.x, point.y
+end
+
+-- offset is in ms, positive when late, nil for a miss. note: the kind of note. x, y: where it is on screen
 for method, judgement in pairs({ Perfect = "perfect", Good = "good", Bad = "bad", Miss = "miss" }) do
   hook(CS.ScoreControl, method, {
-    after = function(self, _, judgeTime)
+    after = function(self, code, judgeTime, at)
       local offset = judgement ~= "miss" and judgeTime ~= 0 and judgeTime * 1000 or nil
-      emit("hit", { judgement = judgement, offset = offset, combo = self._combo })
+      local note, line = judged(code)
+      local x, y = where(note, line, at)
+      emit("hit", { judgement = judgement, offset = offset, combo = self._combo, note = KINDS[note.type], x = x, y = y })
     end,
   })
 end

@@ -101,3 +101,12 @@ function phigrospp.private()
   local dir = call(activity(), "getFilesDir", "()Ljava/io/File;")
   return JNI.GetStringUTFChars(call(dir, "getAbsolutePath", "()Ljava/lang/String;"))
 end
+
+-- the link the app was opened with (phigrospp://...), given once
+function phigrospp.link()
+  local intent = call(activity(), "getIntent", "()Landroid/content/Intent;")
+  local link = call(intent, "getDataString", "()Ljava/lang/String;")
+  if link == 0 then return nil end -- a null object
+  call(intent, "setData", "(Landroid/net/Uri;)Landroid/content/Intent;", { { l = 0 } })
+  return JNI.GetStringUTFChars(link)
+end

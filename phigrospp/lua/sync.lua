@@ -6,6 +6,7 @@
 
 local UE, IO = CS.UnityEngine, CS.System.IO
 local OUTBOX, PROFILE, SAVE = phigrospp.root .. "/outbox", phigrospp.root .. "/profile.lua", phigrospp.root .. "/save/"
+local PENDING = phigrospp.root .. "/save-pending" -- while it exists, the save changed since it was last sent
 local PLAYS = phigrospp.root .. "/plays" -- finished songs not sent yet, one json object per line
 local TAB = "Profile" -- the game's Profile page, under its cloud save login
 local identity, json, ui = phigrospp.identity, phigrospp.json, phigrospp.ui
@@ -23,7 +24,7 @@ local PLACEHOLDER = "There is a self-introduction, write something just like:\r\
     .. "YouTube: Pigeon Games\r\n\r\nHope you have fun in Phigros.\r\nBest regards,\r\nPigeon Games"
 local outbox, sending = {}, {}
 local plays, sendingPlays, started = {}, false, 0 -- the summaries waiting, and when the song being played started
-local saveChanged -- a song ended since the save was last sent
+local saveChanged = IO.File.Exists(PENDING) -- a song ended since the save was last sent, after a restart too
 
 -- sync is only on once signed up: a sign up the game closed during is off again
 if sync() and not profile then sync(false) end
@@ -215,6 +216,11 @@ local MODULES = { "gameKey", "gameProgress", "gameRecord", "settings", "user" }
 -- device's, and this device's isn't uploaded: a fresh install never replaces it
 local OFFER = phigrospp.root .. "/save-offer"
 
+local function changeSave()
+  saveChanged = true
+  phigrospp.write(PENDING, "")
+end
+
 -- the save as the game's cloud save makes it (CloudSaveManager.SaveToFolder: each module read from the game and
 -- written encrypted to its own file) and the game's summary of it, sent as the files one after the other
 local function sendSave()
@@ -229,8 +235,9 @@ local function sendSave()
   phigrospp.signed("PUT", "/api/save", table.concat(parts), function(status, body)
     if status ~= 200 then
       saveChanged = true
-      print(("sync: the save waits, server answered %d %s"):format(status, body))
+      return print(("sync: the save waits, server answered %d %s"):format(status, body))
     end
+    if not saveChanged then os.remove(PENDING) end
   end)
 end
 
@@ -276,6 +283,36 @@ local function flush()
   end
 end
 
+-- the device's records go to phigros.tools, which keeps the player's best of each chart whatever save comes after, and
+-- the bests there that beat them (played on another device or a lost install) come back into the save, each of score,
+-- accuracy and FC at its best like the game keeps them. the site names songs without the game's ".0", and a song this
+-- game version lacks is skipped. returns the status and how many records were sent
+local function exchangeRecords(list)
+  local lines, mine = {}, {}
+  for _, r in ipairs(list) do
+    mine[r.id .. "\t" .. r.difficulty] = r
+    lines[#lines + 1] = ("%s\t%s\t%d\t%.4f\t%d"):format(r.id, r.difficulty, r.score, r.accuracy, r.fc and 1 or 0)
+  end
+  local status, body = call("PUT", "/api/records", table.concat(lines, "\n"))
+  if status ~= 200 then return status end
+  local answer, ids, taken = json.decode(body), {}, false
+  for _, s in ipairs(songs()) do ids[(s.id:gsub("%.0$", ""))] = s.id end
+  for _, best in ipairs(answer.better) do
+    local id = ids[best.song]
+    if id then
+      local had = mine[id .. "\t" .. best.level] or { score = 0, accuracy = 0, fc = false }
+      local record = CS.LevelRecord()
+      record.s = math.max(had.score, math.tointeger(best.score))
+      record.a = math.max(had.accuracy, best.accuracy)
+      record.c = (had.fc or best.fc == 1) and 1 or 0
+      CS.GameInformation.main:SetSongRecord(id, best.level, record)
+      taken = true
+    end
+  end
+  if taken then changeSave() end
+  return status, math.tointeger(answer.count)
+end
+
 on("best", function(path)
   if not sync() or not profile or not uploadReplays() then return end
   outbox[path] = true
@@ -289,7 +326,7 @@ on("song", function() started = now() end)
 -- the play joins the ones waiting, for the player's stats on phigros.tools
 on("finish", function(result)
   if replaying() or phigrospp.charts.custom(playing().id) then return end
-  saveChanged = true
+  changeSave()
   if not sync() or not profile or not uploadPlays() then return end
   local chart = playing()
   plays[#plays + 1] = json.encode({ song = chart.id, level = chart.difficulty, score = result.score,
@@ -378,12 +415,16 @@ local function offerSave(fromSite)
 end
 
 -- an offer the player didn't answer (the game closed, or phigros.tools was out of reach) comes back on the chapter
--- screen
-local offering
+-- screen. without one, the first time there each launch takes back the player's bests phigros.tools has
+local offering, exchanged
 on("scene", function(scene)
   if offering or scene ~= "ChapterSelector" or not sync() or not profile then return end
   local restored = IO.File.Exists(OFFER)
-  if not restored and not siteOffer then return end
+  if not restored and not siteOffer then
+    if exchanged or not canUpload() then return end
+    exchanged = true
+    return coroutine.wrap(exchangeRecords)(records())
+  end
   offering, siteOffer = true, false
   coroutine.wrap(function()
     if not offerSave(not restored) and restored then forceSync() end
@@ -535,23 +576,21 @@ function forceSync()
     if field ~= "name" then profile.sent[field] = nil end
   end
   update()
-  local lines, replays = {}, 0
-  for _, r in ipairs(records()) do
-    lines[#lines + 1] = ("%s\t%s\t%d\t%.4f\t%d"):format(r.id, r.difficulty, r.score, r.accuracy, r.fc and 1 or 0)
+  local list, replays = records(), 0
+  for _, r in ipairs(list) do
     for _, replay in ipairs(uploadReplays() and phigrospp.replay.list(r.id, r.difficulty) or {}) do
       if replay.header.score == r.score then
         outbox[replay.path], replays = true, replays + 1
       end
     end
   end
-  local status, body = call("PUT", "/api/records", table.concat(lines, "\n"))
+  local status, sent = exchangeRecords(list)
   forcing = false
   if status ~= 200 then return toast(("Couldn't sync with phigros.tools (%d)"):format(status)) end
   local function count(n, thing) return ("%d %s%s"):format(n, thing, n == 1 and "" or "s") end
-  toast(("Synced %s and %s with phigros.tools"):format(count(math.tointeger(json.decode(body).count), "record"),
-    count(replays, "replay")))
+  toast(("Synced %s and %s with phigros.tools"):format(count(sent, "record"), count(replays, "replay")))
   saveOutbox()
-  saveChanged = true
+  changeSave()
   flush()
 end
 
