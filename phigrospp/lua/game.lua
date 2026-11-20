@@ -4,6 +4,7 @@ local emit = phigrospp.emit
 local LANGUAGES = { [40] = "chinese", [41] = "chineseTraditional", [10] = "english", [22] = "japanese", [23] = "korean" }
 
 local chart, scorer, paused
+local lines -- the level's judge lines by index, looked for when a hit needs one
 
 function language() return LANGUAGES[CS.MultiLanguageManager.GetCurrentLanguage()] end
 
@@ -96,7 +97,7 @@ hook(CS.LevelControl, "SortForAllNoteWithTime", {
     chart = { id = info.songsId, name = info.songsName, difficulty = info.songsLevel, level = info.songsDifficulty,
       composer = info.composer, charter = info.charter, illustrator = info.illustrator, mirror = info.mirror,
       notes = level.levelInformation.numOfNotes }
-    scorer, paused = level.scoreControl, false
+    scorer, paused, lines = level.scoreControl, false, nil
     emit("song", chart)
   end,
 })
@@ -109,12 +110,34 @@ hook(CS.LevelControl, "OnDestroy", {
   end,
 })
 
--- offset is in ms, positive when late, nil for misses, drags and flicks
+-- where a hit is on screen, in pixels: nothing while nothing is drawn (a replay being sought). the game says where a
+-- perfect or a good is. a miss or a bad is where its note sits on its line, found from the note's code: its line
+-- (millions), its side of the line (100000 for below) and its place in that side's notes (tens)
+local function where(code, at)
+  local camera = CS.UnityEngine.Camera.main
+  if not camera then return nil end
+  if not at then
+    if not lines then
+      local all = CS.UnityEngine.Object.FindObjectsOfType(CS.JudgeLineControl)
+      lines = {}
+      for i = 0, #all - 1 do lines[all[i].index] = all[i] end
+    end
+    code = math.floor(code)
+    local line = lines[code // 1000000]
+    local notes = code % 1000000 >= 100000 and line.notesBelow or line.notesAbove
+    at = line.transform:TransformPoint({ notes:get_Item(code % 100000 // 10).positionX, 0, 0 })
+  end
+  local point = camera:WorldToScreenPoint(at)
+  return point.x, point.y
+end
+
+-- offset is in ms, positive when late, nil for misses, drags and flicks. x, y: where it is on screen
 for method, judgement in pairs({ Perfect = "perfect", Good = "good", Bad = "bad", Miss = "miss" }) do
   hook(CS.ScoreControl, method, {
-    after = function(self, _, judgeTime)
+    after = function(self, code, judgeTime, at)
       local offset = judgement ~= "miss" and judgeTime ~= 0 and judgeTime * 1000 or nil
-      emit("hit", { judgement = judgement, offset = offset, combo = self._combo })
+      local x, y = where(code, at)
+      emit("hit", { judgement = judgement, offset = offset, combo = self._combo, x = x, y = y })
     end,
   })
 end
