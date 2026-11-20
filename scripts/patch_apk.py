@@ -1,6 +1,7 @@
 """usage: patch_apk.py <in.apk> <out.apk> <package> [<path in apk>=<file>...], copies an apk under another package
-(the providers named after it follow), named Phigros++ in the launcher with a ++ tab on its icon, with the files given
-put in and the store's signature left out. the other entries are copied byte for byte, keeping the build fast and reproducible"""
+(the providers named after it follow), named Phigros++ in the launcher with a ++ tab on its icon, opened by
+phigrospp:// links, with the files given put in and the store's signature left out. the other entries are copied byte
+for byte, keeping the build fast and reproducible"""
 import io
 import re
 import struct
@@ -10,8 +11,12 @@ import zlib
 
 ORIGINAL = "com.PigeonGames.Phigros"
 LABEL = "Phigros++"
+SCHEME = "phigrospp"  # of the links that open the app (phigrospp/lua/catalog.lua reads them)
 LABEL_ATTRIBUTE = 0x01010001  # android:label
+NAME_ATTRIBUTE = 0x01010003  # android:name
+SCHEME_ATTRIBUTE = 0x01010027  # android:scheme
 SHELL_ATTRIBUTE = 0x01010594  # android:shell
+LAUNCHER = "android.intent.category.LAUNCHER"
 ANDROID = "http://schemas.android.com/apk/res/android"
 # apksigner drops the source stamp, dropping it here lets a release be compared without its signature
 DROPPED = ("META-INF/BNDLTOOL.", "META-INF/MANIFEST.MF", "stamp-cert-sha256")
@@ -54,29 +59,60 @@ def manifest(data, package):
     strings = [package + s[len(ORIGINAL):] if s == ORIGINAL or s.startswith(ORIGINAL + ".") and s.endswith(".provider")
                else s for s in strings]
 
-    rest, at, ids = bytearray(data[pool + size:]), 0, ()
+    rest, at, ids, launcher = bytearray(data[pool + size:]), 0, (), None
     while at < len(rest):
         kind, _, chunk = struct.unpack_from("<HHI", rest, at)
+        element = kind == 0x0102 and strings[struct.unpack_from("<I", rest, at + 20)[0]]
+        first, step, attributes = struct.unpack_from("<HHH", rest, at + 24) if element else (0, 20, 0)
         if kind == 0x0180:  # resource ids of the first strings, the attribute names
             ids, idmap = struct.unpack_from(f"<{(chunk - 8) // 4}I", rest, at + 8), (at, at + chunk)
-        elif kind == 0x0102 and strings[struct.unpack_from("<I", rest, at + 20)[0]] == "application":
+        elif element == "application":
             inside = at + chunk
-            first, step, attributes = struct.unpack_from("<HHH", rest, at + 24)
-            for i in range(attributes):
-                attribute = at + 16 + first + i * step
-                if ids[struct.unpack_from("<I", rest, attribute + 4)[0]] == LABEL_ATTRIBUTE:
-                    strings.append(LABEL)
-                    struct.pack_into("<IHBBI", rest, attribute + 8, len(strings) - 1, 8, 0, 0x03, len(strings) - 1)
+        elif element == "activity":
+            activity = at + chunk
+        for attribute in range(at + 16 + first, at + 16 + first + attributes * step, step):
+            name, value = struct.unpack_from("<II", rest, attribute + 4)
+            if element == "application" and ids[name] == LABEL_ATTRIBUTE:
+                strings.append(LABEL)
+                struct.pack_into("<IHBBI", rest, attribute + 8, len(strings) - 1, 8, 0, 0x03, len(strings) - 1)
+            elif element == "category" and value < len(strings) and strings[value] == LAUNCHER:
+                launcher = activity  # the activity the launcher opens, unity's
         at += chunk
 
-    # <profileable android:shell="true"/> first in <application>, so simpleperf can sample the game. an attribute's
-    # name is its string's resource id, the map gets longer to reach the new string, other strings map to 0
-    strings += ["profileable", "shell"]
-    element, shell = len(strings) - 2, len(strings) - 1
-    profileable = struct.pack("<HHIIIIIHHHHHHIIIHBBI", 0x0102, 16, 56, 0, 0xFFFFFFFF, 0xFFFFFFFF, element, 20, 20, 1, 0,
-                              0, 0, strings.index(ANDROID), shell, 0xFFFFFFFF, 8, 0, 0x12, 0xFFFFFFFF)  # a boolean
-    profileable += struct.pack("<HHIIIII", 0x0103, 16, 24, 0, 0xFFFFFFFF, 0xFFFFFFFF, element)
-    ids = list(ids) + [0] * (shell - len(ids)) + [SHELL_ATTRIBUTE]
+    def string(s):
+        if s not in strings:
+            strings.append(s)
+        return strings.index(s)
+
+    # an attribute's name is its string's resource id, the map gets longer to reach a new one, other strings map to 0
+    def attribute(name, resource):
+        nonlocal ids
+        strings.append(name)
+        ids = list(ids) + [0] * (len(strings) - 1 - len(ids)) + [resource]
+        return len(strings) - 1
+
+    # an element around its children, with attributes of the android namespace: (name, type, value) each
+    def element(tag, attributes, children=b""):
+        tag = string(tag)
+        body = b"".join(struct.pack("<IIIHBBI", strings.index(ANDROID), name, value if kind == 0x03 else 0xFFFFFFFF, 8,
+                                    0, kind, value) for name, kind, value in attributes)
+        return (struct.pack("<HHIIIIIHHHHHH", 0x0102, 16, 36 + len(body), 0, 0xFFFFFFFF, 0xFFFFFFFF, tag, 20, 20,
+                            len(attributes), 0, 0, 0) + body + children
+                + struct.pack("<HHIIIII", 0x0103, 16, 24, 0, 0xFFFFFFFF, 0xFFFFFFFF, tag))
+
+    def named(tag, value):
+        return element(tag, [(list(ids).index(NAME_ATTRIBUTE), 0x03, string(value))])
+
+    # the launcher's activity also opens phigrospp:// links, from a browser too. only the base apk has activities. it's
+    # after inside, so it goes in first
+    if launcher:
+        rest[launcher:launcher] = element(
+            "intent-filter", [], named("action", "android.intent.action.VIEW")
+            + named("category", "android.intent.category.DEFAULT")
+            + named("category", "android.intent.category.BROWSABLE")
+            + element("data", [(attribute("scheme", SCHEME_ATTRIBUTE), 0x03, string(SCHEME))]))
+    # <profileable android:shell="true"/> first in <application>, so simpleperf can sample the game
+    profileable = element("profileable", [(attribute("shell", SHELL_ATTRIBUTE), 0x12, 0xFFFFFFFF)])  # a boolean
     rest[inside:inside] = profileable
     rest[idmap[0]:idmap[1]] = struct.pack(f"<HHI{len(ids)}I", 0x0180, 8, 8 + 4 * len(ids), *ids)
 
