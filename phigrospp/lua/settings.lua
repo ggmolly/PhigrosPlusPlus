@@ -1,11 +1,16 @@
--- setting(label, default, options, tab), button(label, fn, tab), link(label, fn, tab) and progress(fn, tab) for mods, in a tab of the game
+-- setting(label, default, options, tab), button(label, fn, tab), link(label, fn, tab), progress(fn, tab) and
+-- row(height, draw, tab) for mods, in a tab of the game
 -- settings. a setting is a toggle, a slider with a { min, max } range or a choice with a list, its value saved in
 -- settings.lua. tab(name, shown) shows a tab only while shown() is true, and a last shown argument does the same for
--- a row. a tab named like one of the game's own pages (PAGES) puts its rows into that page
+-- a row. tab(name, shown, draw) is a tab drawing its page itself. a tab named like one of the game's own pages (PAGES)
+-- puts its rows into that page
 
 local UE = CS.UnityEngine
 local PATH = phigrospp.root .. "/settings.lua"
 local TAG = "phigrospp:" -- prefix of the objects we add to the settings screen
+local REOPEN = TAG .. "tab" -- the value keeping the tab that was open through a reload
+local INSET = 72 -- how far right of where the game puts a list a tab's rows go, to sit in the middle of the panel
+local PAGE_INSET = 52 -- how far in from both ends rows put in a game's page go, to line up with what's above them
 local LANGUAGES = { "chinese", "chineseTraditional", "english", "japanese", "korean" }
 
 local chunk = loadfile(PATH, "t", {})
@@ -51,10 +56,21 @@ local function newTab(name)
   return tabs[name]
 end
 
+local made = {} -- the file that made each setting or button and the tab it's in, to find a mod's tab
+
 local function register(label, tab, kind)
   if kinds[label] then error(("%q is already a setting or button"):format(label), 3) end
   kinds[label] = kind
-  table.insert(newTab(tab or "Phigros++"), label)
+  tab = tab or "Phigros++"
+  made[#made + 1] = { source = debug.getinfo(3, "S").source, tab = tab }
+  table.insert(newTab(tab), label)
+end
+
+-- the tab holding what the files under dir (a mod's folder) put in the settings, if they put anything
+function phigrospp.tabOf(dir)
+  for _, m in ipairs(made) do
+    if m.source:sub(2, #dir + 1) == dir then return m.tab end
+  end
 end
 
 -- the getter sets the value too when given one, as if the player had
@@ -87,7 +103,16 @@ function link(label, fn, tab, shown) register(label, tab, { type = "link", fn = 
 -- { left =, center =, right = }
 function progress(fn, tab, shown) register(fn, tab, { type = "progress", shown = shown }) end
 
-function tab(name, shown) newTab(name).shown = shown end
+-- an empty row `height` high that draw(row) fills each time the settings are built: row is its RectTransform, as wide
+-- as the tab's rows. for what no other row shows, like a preview
+function row(height, draw, tab, shown) register(draw, tab, { type = "row", height = height, shown = shown }) end
+
+-- draw(view, font) fills the tab's page in place of rows, each time the settings screen is built: view is a
+-- RectTransform as high as the game's list and centred on the screen, font the game's
+function tab(name, shown, draw)
+  local t = newTab(name)
+  t.shown, t.draw = shown, draw
+end
 
 local function shownTabs()
   local list = {}
@@ -257,6 +282,15 @@ end
 local function addItem(manager, label)
   local kind = kinds[label]
   if kind.type == "progress" then return progressRow(manager) end
+  if kind.type == "row" then
+    -- a button row without its shape, as high as asked
+    local item = manager:AddButton(text(""), {})
+    local shape = item.button:GetComponent(CS.Lean.Gui.LeanPolygon)
+    shape.color, shape.raycastTarget = { 0, 0, 0, 0 }, false
+    item.transform.sizeDelta = { item.transform.sizeDelta.x, kind.height }
+    label(item.transform)
+    return item, false
+  end
   if kind.type == "link" then return linkRow(manager, label, kind.fn) end
   if kind.type == "toggle" then return manager:AddToggle(title(label), values[label], {}), true end
   if kind.type == "slider" and kind.options.step then return stepperRow(manager, label, kind.options) end
@@ -299,7 +333,9 @@ local function list(screen, viewport, content, holder, name)
     local item, follows = addItem(manager, label)
     if follows == true then added.items[label] = item end
     if type(follows) == "table" then added.bars[label] = follows
-    elseif type(label) == "function" then added.titles[label] = { item = item, shown = label() } end
+    elseif type(label) == "function" and kinds[label].type ~= "row" then
+      added.titles[label] = { item = item, shown = label() } -- a label that changes
+    end
     if kinds[label].shown then
       rows[#rows + 1] = { item = item.gameObject, shown = kinds[label].shown }
       item.gameObject:SetActive(kinds[label].shown() and true or false)
@@ -319,6 +355,15 @@ local function shift(block, dy)
   block.anchoredPosition = { at.x + dy * CS.SettingItemsManager.InverseSlope, at.y + dy }
 end
 
+-- lays a page's rows out as the game does (which places their holder anew each time), then brings both their ends in
+local function arrange(manager, holder)
+  manager.offset = 0
+  manager:RefreshItems()
+  manager:RefreshPosition()
+  local min, max = holder.offsetMin, holder.offsetMax
+  holder.offsetMin, holder.offsetMax = { min.x + PAGE_INSET, min.y }, { max.x - PAGE_INSET, max.y }
+end
+
 -- the rows take the place of the block they go above, which moves down with the ones after it. the list follows the
 -- slant on its own (SettingItemsManager.RefreshPosition), and the page grows by the rows. the game turns the page's
 -- scrolling off as it fits the screen, it's on while the rows are there
@@ -336,9 +381,7 @@ local function addPage(screen, name)
   holder:SetParent(box, false)
   holder.anchorMin, holder.anchorMax, holder.pivot, holder.sizeDelta = { 0, 1 }, { 1, 1 }, { 0.5, 1 }, { 0, 0 }
   local manager, rows = list(screen, box, box, holder, name)
-  manager.offset = 0
-  manager:RefreshItems()
-  manager:RefreshPosition()
+  arrange(manager, holder)
   local grown = box.sizeDelta.y + PAGE_GAP
   local moved, at = {}, {}
   for i = above:GetSiblingIndex(), blocks.childCount - 2 do -- the box is the last child
@@ -348,7 +391,7 @@ local function addPage(screen, name)
   end
   content.sizeDelta = { content.sizeDelta.x, content.sizeDelta.y + grown }
   added.pages[#added.pages + 1] = { box = box, content = content, blocks = blocks, grown = grown, moved = moved,
-    scroll = scroll, scrolled = scroll.enabled, manager = manager, at = at }
+    scroll = scroll, scrolled = scroll.enabled, manager = manager, at = at, holder = holder }
   rows.page = added.pages[#added.pages]
   scroll.enabled = true
 end
@@ -366,10 +409,7 @@ local function refresh(rows)
   if not changed then return end
   local page = rows.page
   if not page then return rows.manager:RefreshItems() end
-  -- in the order addPage lays it out
-  page.manager.offset = 0
-  page.manager:RefreshItems()
-  page.manager:RefreshPosition()
+  arrange(page.manager, page.holder)
   local grown = page.box.sizeDelta.y + PAGE_GAP
   for i, block in ipairs(page.moved) do
     shift(block, page.grown - grown)
@@ -404,10 +444,31 @@ local function addTab(screen, name, index)
     if child.name ~= "Scroll View" then UE.Object.Destroy(child.gameObject) end
   end
 
-  local manager = list(screen, content.parent, content, items, name)
-  manager.offset = screen.settingItemsManager.offset
-  manager:RefreshItems()
-  return { button = button, page = page, content = content, index = index }
+  if tabs[name].draw then
+    local view = content.parent.parent
+    UE.Object.DestroyImmediate(view:GetComponent(UE.UI.ScrollRect)) -- the tab scrolls what it draws itself
+    -- what holds the pages sits right of the screen's middle, clear of the back button. what's drawn gets an area as
+    -- high as the game's list but centred on the screen, like the panel behind the pages: it grows left by how much
+    -- further that holder is from the left edge than from the right one. drawn a frame later: a screen that just
+    -- started has no sizes yet
+    added.drawn[#added.drawn + 1] = function()
+      local frames = page.transform.parent
+      local area = UE.GameObject(TAG .. name .. " area"):AddComponent(UE.RectTransform)
+      area:SetParent(view, false)
+      area.anchorMin, area.anchorMax, area.pivot = { 0, 0 }, { 1, 1 }, { 1, 0.5 }
+      area.sizeDelta = { frames.offsetMin.x + frames.offsetMax.x, 0 }
+      tabs[name].draw(area, button:GetComponent(UE.UI.Text).font)
+    end
+  else
+    local manager = list(screen, content.parent, content, items, name)
+    manager.offset = screen.settingItemsManager.offset
+    manager:RefreshItems()
+    -- the game lays a list out from the panel's left edge, and again whenever it changes: the whole scroll view
+    -- moves instead, which the game leaves where it is
+    local view = content.parent.parent
+    view.anchoredPosition = { view.anchoredPosition.x + INSET, view.anchoredPosition.y }
+  end
+  return { button = button, page = page, content = content, index = index, name = name }
 end
 
 local function stretched(name, parent)
@@ -477,7 +538,7 @@ end
 
 local function inject(screen)
   built = layout()
-  added = { screen = screen, tabs = {}, pages = {}, items = {}, titles = {}, bars = {}, lists = {} }
+  added = { screen = screen, tabs = {}, pages = {}, items = {}, titles = {}, bars = {}, lists = {}, drawn = {} }
   local shown = {}
   for _, name in ipairs(shownTabs()) do
     if PAGES[name] then addPage(screen, name) else shown[#shown + 1] = name end
@@ -559,6 +620,7 @@ on("update", function()
   if added then
     if not added.hidden then
       hide()
+      for _, draw in ipairs(added.drawn) do draw() end
     elseif added.reopen then
       added.screen:ChangeTab(added.reopen)
       added.reopen = nil
@@ -596,17 +658,37 @@ on("update", function()
   end
 end)
 
+-- opens a tab of ours on the settings screen, which is open
+function phigrospp.openTab(name)
+  if PAGES[name] then return added.screen:ChangeTab(PAGES[name].index) end
+  for _, t in ipairs(added.tabs) do
+    if t.name == name then added.screen:ChangeTab(t.index) end
+  end
+end
+
 -- the settings screen builds its own tabs in Start, ours go after them
 hook(CS.Setting, "Start", { after = inject })
 
--- or right away when mods load while it's open
+-- or right away when mods load while it's open, back on the tab that was open before the reload
 on("load", function()
-  local screen = UE.Object.FindObjectOfType(CS.Setting)
-  if screen then inject(screen) end
+  local screen, reopen = UE.Object.FindObjectOfType(CS.Setting), values[REOPEN]
+  values[REOPEN] = nil
+  if not screen then return end
+  inject(screen)
+  for _, t in ipairs(added.tabs) do
+    if t.name == reopen then added.reopen = t.index end
+  end
 end)
 
 on("unload", function()
-  if added then remove() end
+  if not added then return end
+  for _, t in ipairs(added.tabs) do
+    if t.index == added.screen.currentTab then
+      values[REOPEN] = t.name
+      save()
+    end
+  end
+  remove()
 end)
 
 
