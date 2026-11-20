@@ -4,7 +4,7 @@
 set -euo pipefail
 MOD=$(dirname "$(dirname "$(realpath "$0")")")
 SRC=$MOD/phigrospp
-CORE="prelude settings net engine icons identity pages game replayfile replay charts sync player picker leaderboard skin update"
+CORE="prelude settings net engine icons identity pages game replayfile replay charts sync player picker leaderboard skin update mods catalog"
 mkdir -p "$MOD/build"
 
 node -e '
