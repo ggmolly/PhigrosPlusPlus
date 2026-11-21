@@ -140,7 +140,7 @@ local function report(from, to)
     ("cpu %.0f%%: %s"):format((to.cpu - from.cpu) / seconds * 100, top(threads, 4, "%s %.0f%%")),
     ("%sclocks %s GHz, heat %s"):format(to.gpu and ("gpu %s, "):format(paint(grade(to.gpu, 0.7), ("%.0f%%"):format(to.gpu * 100)))
       or "", table.concat(to.clocks, " / "), paint(thermal == 0 and 1 or thermal < 3 and 2 or 3, THERMAL[thermal])),
-    ("scene %s, target %d fps, time scale %g"):format(scene(), UE.Application.targetFrameRate, UE.Time.timeScale),
+    ("scene %s, target %d fps, time scale %g"):format(scene(), phigrospp.targetFrameRate(), UE.Time.timeScale),
   }, "\n")
   ui.panel.transform.sizeDelta = { math.max(ui.text.preferredWidth, BARS * ui.width) + 2 * ui.pad,
     ui.text.preferredHeight + ui.height + 3 * ui.pad }

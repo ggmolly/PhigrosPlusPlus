@@ -38,6 +38,10 @@ function phigrospp.launch() return false end
 -- unity paces the frames itself on ios (CADisableMinimumFrameDurationOnPhone, set by patch_ipa.py, unlocks 120 Hz)
 function phigrospp.frameRate() end
 
+-- unity strips Application.targetFrameRate's getter on ios, where it caps the rate the game asks for (380) at the
+-- screen's top one
+phigrospp.targetFrameRate = phigrospp.refreshRate
+
 -- Library/ is the app's own, unlike Documents/ which the Files app shows
 function phigrospp.private() return os.getenv("HOME") .. "/Library" end
 

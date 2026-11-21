@@ -66,7 +66,7 @@ local function played()
   table.sort(files)
   environment = { game = CS.CloudSaveSummary.FromLocalSave().GameVersion, phigrospp = phigrospp.version,
     device = UE.SystemInfo.deviceModel, os = UE.SystemInfo.operatingSystem,
-    refresh = phigrospp.refreshRate(), fps = UE.Application.targetFrameRate,
+    refresh = phigrospp.refreshRate(), fps = phigrospp.targetFrameRate(),
     files = table.concat(files, ","), dpi = Screen.dpi }
   return environment
 end

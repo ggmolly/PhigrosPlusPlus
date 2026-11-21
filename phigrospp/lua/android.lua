@@ -96,6 +96,8 @@ phigrospp.refreshRate = getter(call(activity(), "getDisplay", "()Landroid/view/D
 phigrospp.thermal = getter(call(activity(), "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", { jstring("power") }),
   "getCurrentThermalStatus", "()I", "Int")
 
+function phigrospp.targetFrameRate() return UE.Application.targetFrameRate end
+
 -- the app's own folder, which no other app can read on any android: for secrets (the phigros.tools key)
 function phigrospp.private()
   local dir = call(activity(), "getFilesDir", "()Ljava/io/File;")
