@@ -223,9 +223,10 @@ end
 function phigrospp.speed(x)
   if not x then return speed end
   local music = stage.progressControl.audioSource
-  speed, clock, music.audioSource.pitch = x, music.time, x
+  speed, music.audioSource.pitch = x, x
   if ticking and x == 1 then ticking = unhook(ticking) end
-  if not ticking and x ~= 1 then ticking = hook(CS.ProgressControl, "Update", { before = tick }) end
+  -- the clock starts from the music's, then keeps its own: a jump sets it
+  if not ticking and x ~= 1 then clock, ticking = music.time, hook(CS.ProgressControl, "Update", { before = tick }) end
 end
 
 -- puts the song being played back at its start in place, every note unjudged and nothing scored. the game then
