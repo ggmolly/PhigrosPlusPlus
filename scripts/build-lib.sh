@@ -9,6 +9,7 @@ LUA=$MOD/vendor/lua # github.com/lua/lua at v5.4.7
 DOBBY=$MOD/vendor/dobby # github.com/jmpews/Dobby at b0176de574, later commits don't build
 NACL=$MOD/vendor/tweetnacl # tweetnacl.cr.yp.to 20140427
 OPUS=$MOD/vendor/opus # github.com/xiph/opus at v1.6.1, the linker drops all but the decoder
+TINF=$MOD/vendor/tinf # github.com/jibsen/tinf at v1.2.1, inflates the block areas of .phc charts
 OUT=$MOD/build
 mkdir -p "$OUT"
 
@@ -42,8 +43,8 @@ done
 
 "$CC" -shared -fPIC -O2 -std=gnu11 -fvisibility=hidden -Wall -Wno-unused-function \
   -DTHUNKS=1024 -DLUA_USE_POSIX -DOPUS_BUILD -DOPUS_EXPORT= -DUSE_ALLOCA -DHAVE_LRINTF -DHAVE_LRINT -DLUA_USE_DLOPEN -DNATIVE="$(cat "$SRC/NATIVE")" -DGAME="\"$GAME\"" \
-  -I"$LUA" -I"$DOBBY/include" -I"$NACL" -I"$OPUS/include" -I"$OPUS/celt" -I"$OPUS/silk" -I"$OPUS/silk/float" -I"$OUT" \
-  "${sources[@]}" "$SRC/phigrospp.c" "$SRC/sync.c" "$SRC/bundle.c" "$SRC/phc.c" "$SRC/media.c" "$SRC/thunks.S" "$OUT/dobby/libdobby.a" \
+  -I"$LUA" -I"$DOBBY/include" -I"$NACL" -I"$TINF/src" -I"$OPUS/include" -I"$OPUS/celt" -I"$OPUS/silk" -I"$OPUS/silk/float" -I"$OUT" \
+  "${sources[@]}" "$TINF/src/tinflate.c" "$SRC/phigrospp.c" "$SRC/sync.c" "$SRC/bundle.c" "$SRC/phc.c" "$SRC/media.c" "$SRC/thunks.S" "$OUT/dobby/libdobby.a" \
   -o "$OUT/libphigrospp.sym.so" -l:libc++_static.a -l:libc++abi.a -llog -lmediandk -ldl -lm \
   -Wl,--gc-sections -Wl,--exclude-libs,ALL -Wl,-z,max-page-size=16384 -Wl,--build-id=none
 # the symbols stay in build/libphigrospp.sym.so, for make profile to name its functions

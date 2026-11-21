@@ -9,6 +9,7 @@
 
 #include "lauxlib.h"
 #include "phigrospp.h"
+#include "tinf.h"
 
 #define CTX_SIZE 65  // 6-bit magnitude tree (nodes 1..63) + sign
 #define MANT_SIZE (64 * 4)
@@ -482,13 +483,29 @@ static size_t varint(const uint8_t *buf, size_t size, size_t *at) {
   return n;
 }
 
-// phc(data) -> the chart's json. modes 2 and 4 carry a patch that only restores how some numbers were written in the
-// raw text, the values don't need it
-static int l_phc(lua_State *L) {
-  size_t n, at = 1;
-  const uint8_t *data = (const uint8_t *)luaL_checklstring(L, 1, &n);
+// pushes the chart's json. modes 2 and 4 carry a patch that only restores how some numbers were written in the raw
+// text, the values don't need it. mode 5 is another mode's chart, then the text of its block areas deflated
+static int decode(lua_State *L, const uint8_t *data, size_t n) {
+  size_t at = 1;
   int mode = n ? data[0] : -1;
   size_t length = n ? n - 1 : 0;
+  if (mode == 5) {
+    length = varint(data, n, &at);
+    if (length > n - at) return luaL_error(L, "broken .phc file");
+    decode(L, data + at, length);
+    at += length;
+    unsigned int size = (unsigned int)varint(data, n, &at);
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+    size_t chart;
+    const char *json = lua_tolstring(L, -2, &chart);
+    luaL_addlstring(&b, json, chart - 1);  // without its closing brace, which ends the tail
+    char *tail = luaL_prepbuffsize(&b, size);
+    if (tinf_uncompress(tail, &size, data + at, (unsigned int)(n - at)) != TINF_OK) return luaL_error(L, "broken .phc file");
+    luaL_addsize(&b, size);
+    luaL_pushresult(&b);
+    return 1;
+  }
   if (mode == 2 || mode == 4) {
     length = varint(data, n, &at);
     if (length > n - at) length = n - at;
@@ -506,6 +523,13 @@ static int l_phc(lua_State *L) {
   if (d.broken) return luaL_error(L, "broken .phc file");
   luaL_pushresult(&j.b);
   return 1;
+}
+
+// phc(data) -> the chart's json
+static int l_phc(lua_State *L) {
+  size_t n;
+  const uint8_t *data = (const uint8_t *)luaL_checklstring(L, 1, &n);
+  return decode(L, data, n);
 }
 
 void open_phc(lua_State *L) {

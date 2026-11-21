@@ -7,3 +7,6 @@
 [submodule "vendor/lua"]
 	path = vendor/lua
 	url = https://github.com/lua/lua.git
+[submodule "vendor/tinf"]
+	path = vendor/tinf
+	url = https://github.com/jibsen/tinf.git
