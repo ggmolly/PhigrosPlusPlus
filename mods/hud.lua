@@ -1,4 +1,4 @@
--- provisional grade and accuracy under the score, osu! style hit error bar at the bottom
+-- provisional grade and accuracy under the score, judgement counts under COMBO, osu! style hit error bar at the bottom
 
 local UE = CS.UnityEngine
 
@@ -8,7 +8,7 @@ local function hex(h)
   return { tonumber(h:sub(2, 3), 16) / 255, tonumber(h:sub(4, 5), 16) / 255, tonumber(h:sub(6, 7), 16) / 255, 1 }
 end
 
-local PHI, FC, WHITE = hex("#f5f25b"), hex("#4f8df5"), { 1, 1, 1, 1 }
+local PHI, FC, WHITE, GREY = hex("#f5f25b"), hex("#4f8df5"), { 1, 1, 1, 1 }, hex("#a0a0a0")
 
 -- windows in ms, read from the game when a song starts
 local JUDGE = {
@@ -51,8 +51,8 @@ local function rectangle(parent, layer, name, colour, pos, size)
 end
 
 -- a copy of the score text next to it, so it keeps the score's font and rect
-local function cloneText(score, name, fontSize, pos)
-  local text = UE.Object.Instantiate(score, score.transform.parent, false)
+local function cloneText(score, name, fontSize, pos, parent)
+  local text = UE.Object.Instantiate(score, parent or score.transform.parent, false)
   text.gameObject.name = name
   text.fontSize = fontSize
   text.horizontalOverflow = 1 -- Overflow
@@ -74,9 +74,24 @@ local function canvasOf(score)
   return best
 end
 
+-- a line under the COMBO label, as its child so it follows the label's slide in and size
+local function countsLine(label)
+  local size, column = label.fontSize, label.alignment % 3
+  local line = cloneText(label, "phigrospp-counts", size, { 0, 0 }, label.transform)
+  line.alignment = column -- TextAnchor: same column, upper row
+  line.text = "0"
+  local height = line.preferredHeight
+  local rect = label.transform.rect
+  -- the label's glyph line is anchored at the top, middle or bottom of its rect, ours starts right below it
+  local top = ({ rect.m_Height, (rect.m_Height + height) / 2, height })[label.alignment // 3 + 1]
+  place(line, { column / 2, 0 }, { 0, top - height * 2 }, { math.max(rect.m_Width, 400), height })
+  return line
+end
+
 local showGrade = setting("Grade preview", true)
 local showAccuracy = setting("Accuracy", true)
 local showBar = setting("Timing bar", true)
+local showCounts = setting("Judgement counts", false)
 local hud
 local pending = {}
 local judged = true -- a judgement since the last frame, so the accuracy and grade can change
@@ -101,6 +116,7 @@ local function buildHud(owner, score)
     h.grade = cloneText(score, "phigrospp-grade", infoSize, { scorePos.x, infoY })
     h.grade.text = ""
   end
+  if showCounts() then h.counts, h.shown = countsLine(owner.comboText), {} end
   if not showBar() then return h end
 
   -- the bar sits as far from the bottom as the score is from the top, on the song title's line
@@ -174,12 +190,28 @@ local function updateBar(time)
   end
 end
 
+-- tags replace the text colour, so the label's fade goes into them
+local function tag(colour, alpha, count)
+  return ("<color=#%02X%02X%02X%02X>%d</color>"):format((colour[1] * 255 + 0.5) // 1, (colour[2] * 255 + 0.5) // 1,
+    (colour[3] * 255 + 0.5) // 1, alpha, count)
+end
+
+local function updateCounts(self)
+  local shown, p, g, bad = hud.shown, self.perfect, self.good, self.bad + self.miss
+  local alpha = math.floor(self.comboText.color.a * 255 + 0.5)
+  if p == shown.p and g == shown.g and bad == shown.bad and alpha == shown.alpha then return end
+  shown.p, shown.g, shown.bad, shown.alpha = p, g, bad, alpha
+  hud.counts.text = ("%s  %s  %s"):format(tag(JUDGE.perfect.colour, alpha, p), tag(JUDGE.good.colour, alpha, g),
+    tag(GREY, alpha, bad))
+end
+
 local function refresh(self)
   if not hud or hud.owner ~= self then
     pending, judged = {}, true
     hud = buildHud(self, self.score)
   end
   if hud.ticks then updateBar(now() * 1000) end
+  if hud.counts then updateCounts(self) end
   if not judged then return end
   judged = false
 
@@ -217,3 +249,6 @@ for method, kind in pairs({ Perfect = "perfect", Good = "good", Bad = "bad", Mis
     end,
   })
 end
+
+-- a jump of the song can come with another score (a replay going back)
+on("jump", function() judged = true end)
