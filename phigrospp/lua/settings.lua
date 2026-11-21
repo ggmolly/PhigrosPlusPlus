@@ -123,7 +123,12 @@ local function shownTabs()
   return list
 end
 
-local function layout() return table.concat(shownTabs(), "\n") end
+-- rows a mod adds once the screen is built (in its on("load")) build it again too
+local function layout()
+  local list = {}
+  for _, name in ipairs(shownTabs()) do list[#list + 1] = name .. " " .. #tabs[name] end
+  return table.concat(list, "\n")
+end
 
 local function text(s)
   local t = CS.Phigros2.Utils.MultiLanguageText.MultiLanguageTextString()
@@ -612,7 +617,7 @@ on("update", function()
   if wanted ~= built then
     built = wanted
     local screen = added and added.screen or UE.Object.FindObjectOfType(CS.Setting)
-    local open = screen and screen.currentTab
+    local open = added and added.reopen or screen and screen.currentTab
     if added then remove() end
     if screen then
       inject(screen)

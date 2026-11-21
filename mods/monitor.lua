@@ -4,9 +4,13 @@
 local UE = CS.UnityEngine
 local GC = CS.System.GC
 
-local enabled = setting("Performance monitor", false)
-local corner = setting("Monitor corner", "bottom left", { "bottom left", "bottom right", "top left", "top right" }, nil,
-  function() return enabled() end)
+-- made once every mod has loaded, so they're the last rows of the Phigros++ tab
+local enabled, corner
+on("load", function()
+  enabled = setting("Performance monitor", false)
+  corner = setting("Monitor corner", "bottom left", { "bottom left", "bottom right", "top left", "top right" }, nil,
+    function() return enabled() end)
+end)
 
 -- frames in the graph, frames a hitch is longer than, frames between two thread reads
 local BARS, HITCH, EVERY = 240, 4, 4
