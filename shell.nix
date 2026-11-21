@@ -6,7 +6,7 @@ let
     sha256 = "sha256-pgG/CO+txdf2sA2z6DsM+2G3F9ajfIp/3BMC4wfKMDY=";
   };
   pkgs = import nixpkgs { config = { allowUnfree = true; android_sdk.accept_license = true; }; };
-  ndk = (pkgs.androidenv.composeAndroidPackages { includeNDK = true; }).ndk-bundle;
+  android = pkgs.androidenv.composeAndroidPackages { includeNDK = true; };
 in
 pkgs.mkShell {
   packages = with pkgs; [
@@ -24,5 +24,8 @@ pkgs.mkShell {
     unzip
     lua54Packages.luacheck
   ];
-  ANDROID_NDK = "${ndk}/libexec/android-sdk/ndk-bundle";
+  ANDROID_NDK = "${android.ndk-bundle}/libexec/android-sdk/ndk-bundle";
+  # d8 and android.jar, which scripts/bundle.sh builds picker.dex with
+  ANDROID_BUILD_TOOLS = "${builtins.head android.build-tools}/libexec/android-sdk/build-tools";
+  ANDROID_PLATFORMS = "${builtins.head android.platforms}/libexec/android-sdk/platforms";
 }

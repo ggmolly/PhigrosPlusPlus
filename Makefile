@@ -4,6 +4,7 @@ APKS ?= ../apks/Phigros-4.1.0
 # Phigros++ installs as its own app, next to the game
 export PACKAGE := sh.molly.phigrosplusplus
 LIB := build/libphigrospp.so
+DEX := build/picker.dex
 SPLIT := out/split_config.arm64_v8a.apk
 
 # every target talks to the same device or files, one at a time
@@ -15,8 +16,16 @@ all: apk
 
 lib: $(LIB)
 $(LIB): $(wildcard phigrospp/* phigrospp/lua/* mods/* mods/*/* vendor/lua/* vendor/tweetnacl/* vendor/opus/*/*) \
-		scripts/build-lib.sh scripts/bundle.sh $(APKS)/base.apk
+		scripts/build-lib.sh scripts/bundle.sh $(APKS)/base.apk $(DEX)
 	scripts/build-lib.sh $(APKS)
+
+# the Fragment phigrospp.pick opens android's file picker with, as a dex the bundle carries
+$(DEX): phigrospp/Picker.java
+	rm -rf build/picker
+	javac -Xlint:-options -cp $(ANDROID_PLATFORMS)/*/android.jar -d build/picker $<
+	$(ANDROID_BUILD_TOOLS)/*/d8 --release --min-api 26 --lib $(ANDROID_PLATFORMS)/*/android.jar --output build/picker \
+		build/picker/phigrospp/*.class
+	mv build/picker/classes.dex $@
 
 apk: $(SPLIT)
 $(SPLIT): $(LIB) scripts/build-apk.sh scripts/patch_libmain.py scripts/patch_apk.py $(wildcard $(APKS)/*.apk)

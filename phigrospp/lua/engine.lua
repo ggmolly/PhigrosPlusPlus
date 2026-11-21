@@ -179,6 +179,48 @@ function phigrospp.link()
   return JNI.GetStringUTFChars(link)
 end
 
+-- android's file picker, showing the files of the mime types given: the picked file's bytes and name, nothing when
+-- the player backs out, nil and why when it can't be read. it waits for the player, so it's called from a coroutine
+-- (a button's function is one). the picker answers the Fragment of the bundle's picker.dex (Picker.java)
+local Picker, picking
+
+function phigrospp.pick(...)
+  local waiting, main = coroutine.running()
+  assert(not main, "phigrospp.pick waits for the player: call it from a button's function or a coroutine")
+  if picking then return end -- a second tap before the picker shows
+  JNI.PushLocalFrame(16)
+  if not Picker then
+    local Buffer, Loader = JNI.FindClass("java/nio/ByteBuffer"), JNI.FindClass("dalvik/system/InMemoryDexClassLoader")
+    local dex = JNI.CallStaticObjectMethod(Buffer, JNI.GetStaticMethodID(Buffer, "wrap", "([B)Ljava/nio/ByteBuffer;"),
+      { { l = JNI.ToByteArray(il2cpp.bytes(phigrospp.bundle["picker.dex"])) } })
+    local loader = JNI.NewObject(Loader, JNI.GetMethodID(Loader, "<init>", "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)V"),
+      { { l = dex }, { l = call(activity(), "getClassLoader", "()Ljava/lang/ClassLoader;") } })
+    Picker = JNI.NewGlobalRef(call(loader, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;",
+      { jstring("phigrospp.Picker") }))
+  end
+  local types = JNI.NewObjectArray(select("#", ...), JNI.FindClass("java/lang/String"), 0)
+  for i, mime in ipairs({ ... }) do JNI.SetObjectArrayElement(types, i - 1, JNI.NewStringUTF(mime)) end
+  JNI.CallStaticVoidMethod(Picker, JNI.GetStaticMethodID(Picker, "pick", "(Landroid/app/Activity;[Ljava/lang/String;)V"),
+    { { l = activity() }, { l = types } })
+  JNI.PopLocalFrame(0)
+  picking = waiting
+  return coroutine.yield()
+end
+
+on("update", function()
+  if not picking or not JNI.GetStaticBooleanField(Picker, JNI.GetStaticFieldID(Picker, "done", "Z")) then return end
+  JNI.PushLocalFrame(16)
+  local field = JNI.GetStaticFieldID(Picker, "data", "[B")
+  local data = JNI.GetStaticObjectField(Picker, field)
+  local name = JNI.GetStaticStringField(Picker, JNI.GetStaticFieldID(Picker, "name", "Ljava/lang/String;"))
+  data = data ~= 0 and il2cpp.unbytes(JNI.FromByteArray(data)) or nil
+  JNI.SetStaticObjectField(Picker, field, 0) -- java keeps no copy
+  JNI.PopLocalFrame(0)
+  local waiting = picking
+  picking = nil
+  resume(waiting, data, name)
+end)
+
 -- a path relative to the file of the mod calling an api function `level` frames up
 function phigrospp.resolve(path, level)
   if path:sub(1, 1) == "/" then return path end

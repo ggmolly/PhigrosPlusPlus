@@ -149,7 +149,7 @@ end
 
 -- the files of a zip as { path = data }. we write each one ourselves, so a path leaving the mod's folder is refused
 -- here, and what's read is counted: a zip unpacking to more than the caps is refused whatever its headers say
-local function unzip(data)
+function phigrospp.unzip(data)
   local archive = IO.Compression.ZipArchive(IO.MemoryStream(il2cpp.bytes(data)), 0, false, nil) -- ZipArchiveMode.Read
   local entries, files, total = archive.Entries, {}, 0
   if entries.Count > FILES_CAP then error("it has too many files", 0) end
@@ -178,7 +178,7 @@ end
 -- a release's files with init.lua at their root: a zip made of one folder holding everything loses that folder
 local function unpack(file, data)
   if file == "mod.lua" then return { ["init.lua"] = data } end
-  local files = unzip(data)
+  local files = phigrospp.unzip(data)
   if files["init.lua"] then return files end
   local top, inside = nil, {}
   for path, content in pairs(files) do

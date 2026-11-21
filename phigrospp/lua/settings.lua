@@ -112,6 +112,7 @@ function row(height, draw, tab, shown) register(draw, tab, { type = "row", heigh
 function tab(name, shown, draw)
   local t = newTab(name)
   t.shown, t.draw = shown, draw
+  made[#made + 1] = { source = debug.getinfo(2, "S").source, tab = name }
 end
 
 local function shownTabs()
