@@ -1,6 +1,6 @@
 # phigros++ development against the device plugged in over adb, see the wiki's Development page
 
-APKS ?= ../apks/Phigros-4.0.1.2
+APKS ?= ../apks/Phigros-4.1.0
 # Phigros++ installs as its own app, next to the game
 export PACKAGE := sh.molly.phigrosplusplus
 LIB := build/libphigrospp.so
