@@ -45,4 +45,7 @@ node -e '
   const pub = crypto.createPublicKey(key).export({ format: "der", type: "spki" }).subarray(-32).toString("hex");
   console.log(`${lines.filter((line) => line.includes("/")).length} mods of ${authors.size} authors, signed by ${pub}`);
 ' "$MOD/registry.txt" "$MOD/build/registry.txt"
-[ "${1:-}" = --local ] || rsync -az "$MOD/build/registry.txt" "$MOD/build/registry.txt.sig" "$SERVER"
+[ "${1:-}" = --local ] && exit
+rsync -az "$MOD/build/registry.txt" "$MOD/build/registry.txt.sig" "$SERVER"
+# the worker rebuilds the catalog's index.json when it starts, then every 15 minutes (web/server/worker.ts)
+ssh illustrious 'cd containers/phigros-tools && docker compose restart worker' >/dev/null
