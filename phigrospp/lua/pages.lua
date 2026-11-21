@@ -18,10 +18,54 @@ local UP, DOWN = { -796.5, 128.9 }, { -809.0, 84.9 } -- where the selected row's
 local TICK = 4 -- the sound (SEPlayer's) the song list plays for each row reaching the middle
 
 local selector, page
+local switches, wanted = {}, {} -- the ones kit.switch made on this song list ({ back =, text =, lit = }), and asked for
 
 on("scene", function(name)
   selector = name == "SongSelector" and UE.Object.FindObjectOfType(CS.SongSelector) or nil
-  page = nil
+  page, switches, wanted = nil, {}, {}
+end)
+
+-- the switch hanging on another (or on the game's Mirror one), if any: its copy placed after it
+local function hanging(switch)
+  for i = 0, switch.childCount - 1 do
+    local child = switch:GetChild(i)
+    if child:Find("Button") then return child end
+  end
+end
+
+-- a switch like the song list's Mirror one, after it and those already there, moving and hiding with them. it's lit
+-- while lit() says so, and tap runs when it's tapped
+function kit.switch(label, lit, tap)
+  wanted[#wanted + 1] = { label = label, lit = lit, tap = tap, frame = UE.Time.frameCount }
+end
+
+local function makeSwitch(w)
+  local mirror = selector.mirrorTextSize.transform
+  local switch = UE.Object.Instantiate(mirror.gameObject, mirror.parent, false).transform
+  -- the copy came with the switches hanging on Mirror, and goes after the last of them
+  local extra, last = hanging(switch), mirror
+  if extra then UE.Object.Destroy(extra.gameObject) end
+  while hanging(last) do last = hanging(last) end
+  switch.name = "phigrospp-switch"
+  switch:SetParent(last, false)
+  switch.anchorMin, switch.anchorMax, switch.pivot, switch.anchoredPosition = { 1, 0.5 }, { 1, 0.5 }, { 0, 0.5 }, { 92, 0 }
+  local back, text = find(switch, "Button"), find(switch, "Text"):GetComponent(UE.UI.Text)
+  switch:GetComponent(UE.UI.Text).text, text.text = w.label, w.label -- the first one sizes it
+  local button = back:GetComponent(UE.UI.Button)
+  button.onClick = UE.UI.Button.ButtonClickedEvent()
+  phigrospp.click(button, w.tap)
+  switches[#switches + 1] = { back = back:GetComponent(CS.Lean.Gui.LeanPolygon), text = text, lit = w.lit }
+end
+
+on("update", function()
+  -- a switch is made the frame after it's asked for: what a reload destroys is still there until then, and a copy
+  -- of Mirror would take it along
+  while wanted[1] and wanted[1].frame < UE.Time.frameCount do makeSwitch(table.remove(wanted, 1)) end
+  -- coloured like Mirror is on and off
+  for _, s in ipairs(switches) do
+    local lit = s.lit()
+    s.back.color, s.text.color = lit and { 1, 1, 1, 0.75 } or { 0, 0, 0, 0.5 }, lit and { 0, 0, 0, 1 } or { 1, 1, 1, 0.7 }
+  end
 end)
 
 -- a canvas set up like the song list's one, and a container that slides in it

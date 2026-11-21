@@ -1,11 +1,10 @@
--- modifiers: holding Play on a song opens them, and the song then plays with the picked ones, like osu!'s mods. such a
--- play never touches the save: its replay and its total go to their own leaderboard on phigros.tools, which judges the
--- replay again with the same rules (phigrospp/lua/modifiers.lua and the site's src/modifiers.ts), so what a modifier
--- does here can't change without the site
+-- modifiers: a switch by the song list's Mirror one opens them, and the song then plays with the picked ones, like
+-- osu!'s mods. such a play never touches the save: its replay and its total go to their own leaderboard on
+-- phigros.tools, which judges the replay again with the same rules (phigrospp/lua/modifiers.lua and the site's
+-- src/modifiers.ts), so what a modifier does here can't change without the site
 
 local UE = CS.UnityEngine
 local M, ui = phigrospp.modifiers, phigrospp.ui
-local HOLD = 0.4 -- seconds Play is held to open them
 local NORMAL = { 0.08, 0.18, 0.22 } -- the game's perfect, good and bad windows in seconds
 local WINDOWS = { EZ = { 0.112, 0.252, 0.308 }, HR = { 0.057, 0.129, 0.157 } }
 local SPEEDS = { HT = 0.75, NC = 1.5 }
@@ -269,7 +268,7 @@ on("scene", function(name)
   selector, strip, shown = nil, nil, nil
   if name ~= "SongSelector" then return end
   selector = UE.Object.FindObjectOfType(CS.SongSelector)
-  phigrospp.hold(selector.startButton, HOLD, open)
+  ui.switch("Modifiers", function() return M.pick() ~= 0 end, open)
 end)
 
 -- the picks show over Play, on a song that plays with them

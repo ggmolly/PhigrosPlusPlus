@@ -48,17 +48,12 @@ end)
 -- the game's Button calls listeners we can't make from lua, so clicks on buttons we made are caught here. a button's
 -- function runs in a coroutine, so it can wait for a choice in a dialog (phigrospp.ui.confirm)
 local clicks = {}
--- what phigrospp.hold waits on: buttons (since when a finger is down on each), and places of the screen
-local holds, places = {}, {}
+local holds = {} -- what phigrospp.hold waits on
 
 function phigrospp.click(button, fn) clicks[button] = fn end
 
--- fn runs, like a click's, once a finger stayed `seconds` on target: a Button of the game's UI, which then doesn't
--- get the click of that finger's release, or a function(x, y) saying whether a point of the screen (pixels) is on it
-function phigrospp.hold(target, seconds, fn)
-  local held = { on = target, seconds = seconds, fn = fn }
-  if type(target) == "function" then places[#places + 1] = held else holds[target] = held end
-end
+-- fn runs, like a click's, once a finger stayed `seconds` where on(x, y) says a point of the screen (pixels) is
+function phigrospp.hold(on, seconds, fn) holds[#holds + 1] = { on = on, seconds = seconds, fn = fn } end
 
 local function resume(co, ...)
   local ok, err = coroutine.resume(co, ...)
@@ -67,36 +62,16 @@ end
 
 -- the game checks interactable after this hook runs
 hook(UE.UI.Button, "OnPointerClick", {
-  skip = function(clicked)
-    if holds[clicked] and holds[clicked].fired then return true end
+  before = function(clicked)
     local click = clicks[clicked]
     if click and clicked:IsInteractable() then resume(coroutine.create(click)) end
-    return false
-  end,
-})
-
-hook(UE.UI.Selectable, "OnPointerDown", {
-  before = function(pressed)
-    local held = holds[pressed]
-    if held then held.since, held.fired = now(), false end
-  end,
-})
-hook(UE.UI.Selectable, "OnPointerUp", {
-  before = function(released)
-    if holds[released] then holds[released].since = nil end
   end,
 })
 
 on("update", function()
-  for _, held in pairs(holds) do
-    if held.since and now() - held.since >= held.seconds then
-      held.since, held.fired = nil, true
-      resume(coroutine.create(held.fn))
-    end
-  end
-  if #places == 0 or UE.Input.touchCount == 0 then return end
+  if #holds == 0 or UE.Input.touchCount == 0 then return end
   local fingers = touches()
-  for _, held in ipairs(places) do
+  for _, held in ipairs(holds) do
     local still
     for _, t in ipairs(fingers) do
       if t.id == held.id and t.phase ~= 3 and t.phase ~= 4 then still = true end -- not Ended or Canceled
@@ -112,10 +87,8 @@ end)
 
 -- buttons that died with their scene are forgotten
 on("scene", function()
-  for _, buttons in ipairs({ clicks, holds }) do
-    for button in pairs(buttons) do
-      if not il2cpp.alive(button) then buttons[button] = nil end
-    end
+  for button in pairs(clicks) do
+    if not il2cpp.alive(button) then clicks[button] = nil end
   end
 end)
 
