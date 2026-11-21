@@ -258,7 +258,7 @@ local function open()
       tap = function() M.pick((M.pick() ~ m.bit) & ~m.excludes) end }
   end
   cells[#cells + 1] = { icon = ui.icon("x"), label = "Reset", colour = { 1, 1, 1, 1 },
-    on = function() return false end, note = function() return M.multiplier(M.pick()) end,
+    on = function() return false end, note = function() return "" end,
     tap = function() M.pick(0) end }
   selector.enabled = false -- the song list reads the touches itself
   ui.confirm({ title = "Modifiers", yes = "Done", no = false, grid = { cells = cells, columns = 5, height = 190 } })
