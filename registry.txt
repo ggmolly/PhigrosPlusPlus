@@ -6,3 +6,6 @@
 ggmolly:c8d37a10fa43af3ef5c0233bed30ceb48c8f718753dc4a0e033581dc5f9deffa
 ggmolly/phigrospp-hit-bursts
 ggmolly/phigrospp-rks-precision
+ggmolly/phigrospp-autoplay
+ggmolly/phigrospp-practice
+ggmolly/phigrospp-phira-skins
