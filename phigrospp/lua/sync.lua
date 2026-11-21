@@ -329,15 +329,16 @@ on("song", start)
 on("restart", start)
 
 -- a song played to its end: the save changes (records, progress) and goes at the next scene change, and a summary of
--- the play joins the ones waiting, for the player's stats on phigros.tools
+-- the play joins the ones waiting, for the player's stats on phigros.tools. with modifiers the save stays as it was
 on("finish", function(result)
   if not phigrospp.counts() or phigrospp.charts.custom(playing().id) then return end
-  changeSave()
+  local mods = phigrospp.modifiers.play()
+  if mods == 0 then changeSave() end
   if not sync() or not profile or not uploadPlays() then return end
   local chart = playing()
   plays[#plays + 1] = json.encode({ song = chart.id, level = chart.difficulty, score = result.score,
     accuracy = result.accuracy, maxcombo = result.maxcombo, perfect = result.perfect, good = result.good,
-    bad = result.bad, miss = result.miss, duration = now() - started, date = os.time() })
+    bad = result.bad, miss = result.miss, duration = now() - started, date = os.time(), mods = mods })
   savePlays()
 end)
 
@@ -586,11 +587,14 @@ function forceSync()
   update()
   local list, replays = records(), 0
   for _, r in ipairs(list) do
-    for _, replay in ipairs(uploadReplays() and phigrospp.replay.list(r.id, r.difficulty) or {}) do
-      if replay.header.score == r.score then
+    local kept = uploadReplays() and phigrospp.replay.list(r.id, r.difficulty) or {}
+    for _, replay in ipairs(kept) do
+      if replay.header.mods == 0 and replay.header.score == r.score then
         outbox[replay.path], replays = true, replays + 1
       end
     end
+    -- the chart's best with each set of modifiers goes along, those are no records of the save's
+    for _, modded in pairs(phigrospp.replay.bests(kept)) do outbox[modded.path], replays = true, replays + 1 end
   end
   local status, sent = exchangeRecords(list)
   forcing = false

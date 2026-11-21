@@ -206,6 +206,7 @@ local function updateCounts(self)
 end
 
 local function refresh(self)
+  if not playing() then return end -- the song's windows are set once it's loaded
   if not hud or hud.owner ~= self then
     pending, judged = {}, true
     hud = buildHud(self, self.score)

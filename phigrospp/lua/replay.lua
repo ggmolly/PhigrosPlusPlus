@@ -229,7 +229,7 @@ local function music(p)
   local source = level.progressControl.audioSource.audioSource
   if p.paused or p.target or p.speed > 1 then return source:Pause() end
   source.time = p.frames[p.cursor].t + level.progressControl._offset
-  source.pitch = p.speed
+  source.pitch = p.speed * phigrospp.speed() -- a replay of Half Time or Nightcore sounds like it was played
   source:UnPause()
 end
 
@@ -294,6 +294,15 @@ phigrospp.replay = {
     assert(os.remove(path))
     phigrospp.emit("replays")
   end,
+  -- the best entry of a list() for each set of modifiers its replays were played with, by their bits
+  bests = function(list)
+    local bests = {}
+    for _, entry in ipairs(list) do
+      local h = entry.header
+      if h.mods ~= 0 and (not bests[h.mods] or h.score > bests[h.mods].header.score) then bests[h.mods] = entry end
+    end
+    return bests
+  end,
   state = function() return playback end,
   -- the cross quitting the replay, in the game's UI
   cross = function() return cross end,
@@ -341,8 +350,8 @@ local SAVING = {
 }
 local blockers, watched
 
--- from a replay's or custom chart's start until the song list, its result screen saves nothing, and a replay's retry
--- watches again
+-- from the start of a replay, a custom chart or a play with modifiers until the song list, its result screen saves
+-- nothing, and a replay's retry watches again
 local function protect(replay)
   watched = replay
   if blockers then return end
@@ -405,7 +414,7 @@ on("song", function(chart)
     end
     print(("replay: watching %s, %d frames"):format(path, #frames))
   else
-    if phigrospp.charts.custom(chart.id) then protect(false) else unprotect() end
+    if phigrospp.charts.custom(chart.id) or phigrospp.modifiers.play() ~= 0 then protect(false) else unprotect() end
     mode, recorded, events = record() and "record" or nil, {}, {}
   end
 end)
@@ -490,19 +499,26 @@ on("finish", function(result)
   end
   if mode ~= "record" then return end
   local chart = playing()
+  local mods, seed = phigrospp.modifiers.play()
   local header = { id = chart.id, difficulty = chart.difficulty, width = Screen.width, height = Screen.height,
     date = os.time(), duration = recorded[#recorded].t, accuracy = result.accuracy,
     offset = level.progressControl._offset, mirror = chart.mirror and 1 or 0,
-    challenge = level.progressControl._inChallengeMode and 1 or 0 }
+    challenge = level.progressControl._inChallengeMode and 1 or 0, mods = mods, seed = seed }
   for _, field in ipairs(RESULT) do header[field] = result[field] end
   for key, value in pairs(played()) do header[key] = value end
   local dir = folder(chart.id, chart.difficulty)
   IO.Directory.CreateDirectory(dir)
+  -- the best the player had on the chart with these modifiers, which is only what their replays say
+  local best = mods ~= 0 and phigrospp.replay.bests(phigrospp.replay.list(chart.id, chart.difficulty))[mods]
   local path, data = ("%s/%d.pigeon"):format(dir, header.date), file.encode(header, recorded, events)
   phigrospp.write(path, data)
   print(("replay: %s, %d frames, %d bytes"):format(path, #recorded, #data))
   phigrospp.emit("replays")
-  kept = { path = path, score = header.score }
+  if mods == 0 then
+    kept = { path = path, score = header.score }
+  elseif not phigrospp.charts.custom(chart.id) and (not best or header.score >= best.header.score) then
+    phigrospp.emit("best", path)
+  end
 end)
 
 -- the result screen raises the chart's record with the play, and record still holds the one from before it. a tie
@@ -526,7 +542,7 @@ end
 
 -- a reload drops the replay's hooks and protection, so the song is left before it can count
 on("unload", function()
-  if mode == "watch" or uncounted and playing() then phigrospp.leave() end
+  if mode == "watch" or (uncounted or phigrospp.modifiers.play() ~= 0) and playing() then phigrospp.leave() end
 end)
 
 on("resume", function()
@@ -544,7 +560,12 @@ on("leave", function()
 end)
 
 -- a song started by watch() is that replay. the flag lives from there to the song, through the scenes in between
-hook(CS.SongSelector, "NormalStart", { before = function() watchNext, armed = armed, nil end })
+hook(CS.SongSelector, "NormalStart", {
+  before = function()
+    watchNext, armed = armed, nil
+    phigrospp.modifiers.start(watchedHeader()) -- a replay's modifiers, else the player's picks
+  end,
+})
 
 on("scene", function(name)
   if name ~= "SongSelector" then return end
