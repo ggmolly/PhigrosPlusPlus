@@ -530,7 +530,8 @@ phigrospp.ui = {
     local subtitle = phigrospp.find(panel, "SubTitle")
     local message = subtitle:GetComponent(UE.UI.Text)
     message.text, message.horizontalOverflow = options.message, 0 -- Wrap
-    local height = math.max(LINE, message.preferredHeight)
+    -- without a message its line is only kept for the one a progress bar writes
+    local height = (options.message or options.progress) and math.max(LINE, message.preferredHeight) or 0
     if options.grid then
       local cells, columns, high = options.grid.cells, options.grid.columns, options.grid.height or ROW
       local rows, width = math.ceil(#cells / columns), subtitle.rect.m_Width / columns
@@ -538,8 +539,11 @@ phigrospp.ui = {
       -- the message keeps the top of the subtitle, the cells fill the space added under it
       message.alignment = 0 -- UpperLeft
       for i, cell in ipairs(cells) do
-        local pos = { (i - 1) % columns * width, (rows - 1 - (i - 1) // columns) * high }
+        local row = (i - 1) // columns
+        local pos = { (i - 1) % columns * width, (rows - 1 - row) * high }
         if type(cell) == "table" then
+          -- tiles fill the width, so each row goes left with the panel's slanted edges
+          pos[1] = pos[1] - row * high * CS.SettingItemsManager.InverseSlope
           tiles[#tiles + 1] = tile(subtitle, message.font, cell, pos, { width - GAP / 2, high - GAP / 2 })
         elseif cell then
           -- one column has nothing to line up with, so it's centered

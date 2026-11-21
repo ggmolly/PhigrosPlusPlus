@@ -261,8 +261,7 @@ local function open()
     on = function() return false end, note = function() return M.multiplier(M.pick()) end,
     tap = function() M.pick(0) end }
   selector.enabled = false -- the song list reads the touches itself
-  ui.confirm({ title = "Modifiers", yes = "Done", no = false, grid = { cells = cells, columns = 5, height = 190 },
-    message = "Scores with modifiers go to their own leaderboard on phigros.tools and never change your records." })
+  ui.confirm({ title = "Modifiers", yes = "Done", no = false, grid = { cells = cells, columns = 5, height = 190 } })
   if il2cpp.alive(selector) then selector.enabled = true end
 end
 
