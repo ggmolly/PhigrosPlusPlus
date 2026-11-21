@@ -8,15 +8,17 @@ local DIR = phigrospp.root .. "/replays"
 local ONLINE = phigrospp.root .. "/online" -- other players' replays downloaded to be watched, until the next load
 local SIGNED = 96 -- phigros.tools keeps a replay with its player's key and signature after it
 local file = phigrospp.replayfile
-local SEEK_SPEED = 32 -- recorded frames per screen frame while seeking
-local JUDGE_SPEED = 256 -- and while judging a replay before it plays
+local SEEK_SPEED = 1024 -- recorded frames per screen frame while seeking or judging a replay before it plays, at most
+local SEEK_TIME = 0.008 -- seconds of a screen frame they may take
+local STARTED = 1e-4 -- seconds of song time, the game holds it at 1e-5 until its music plays
+local JUMPED = 0.5 -- seconds between two frames that only a jump of the song makes
 
 if IO.Directory.Exists(ONLINE) then IO.Directory.Delete(ONLINE, true) end
 
 local record = setting("Record replays", true)
 
 local level, mode
-local armed, watchNext, resume -- the replay the next song start watches, and where a rewind's restart goes
+local armed, watchNext -- the replay the next song start watches
 local whose -- the name#number of the player of the replay started from the song list
 local judged = {} -- the replays (by path) played through once since the game started, see on("song")
 local recorded, events, kept -- recording, and the play just kept until its result screen compares it with the record
@@ -213,7 +215,9 @@ end
 local function simulate(p, n)
   local _, fingers, judge, notes = table.unpack(judging())
   simulating = true
+  local stop = now() + SEEK_TIME
   for _ = 1, n do
+    if now() > stop then break end
     p.cursor = p.cursor + 1
     local frame = p.frames[p.cursor]
     serving, frame.structs = frame, structs(frame.touches)
@@ -241,7 +245,7 @@ end
 local function plan(p)
   -- as many recorded frames as the screen frame lasted, one each when the screen runs at the recorded rate (see
   -- on("song")), more when it can't go that fast
-  p.credit = p.credit + (p.judging and JUDGE_SPEED or p.target and SEEK_SPEED or p.paused and 0 or
+  p.credit = p.credit + (p.target and SEEK_SPEED or p.paused and 0 or
     p.speed * p.rate * Time.unscaledDeltaTime)
   local k = math.min(math.floor(p.credit), #p.frames - p.cursor, p.target and p.target - p.cursor or math.huge)
   p.credit = p.credit - math.floor(p.credit)
@@ -250,10 +254,22 @@ local function plan(p)
   setJudging(p.live)
 end
 
--- the song again from its start, then played fast up to target
-local function reload(p, target)
-  resume, watchNext = { target = target, speed = p.speed, paused = p.paused }, p.path
-  UE.SceneManagement.SceneManager.LoadScene("Level")
+-- what ScoreControl counts of a play
+local SCORE = { "_score", "_percent", "_combo", "maxcombo", "perfect", "good", "bad", "miss", "early", "late",
+  "isAllPerfect", "isFullCombo" }
+
+-- the song back at its start, every note unjudged and nothing scored, then played fast up to target. the frames from
+-- before the music started are always passed, the music only follows a replay once it plays
+local function rewind(p, target)
+  phigrospp.jump(0)
+  local score = level.scoreControl
+  for _, field in ipairs(SCORE) do score[field] = p.fresh[field] end
+  score._noteCodes:Clear()
+  p.cursor, p.credit, p.extra, p.live, p.target = 0, 0, 0, true, math.max(target, p.first)
+  serving = p.frames[1]
+  serving.structs = structs(serving.touches)
+  setJudging(true)
+  music(p)
 end
 
 -- the replays of a chart and control of the one being watched, for the picker and the player on screen
@@ -305,7 +321,7 @@ phigrospp.replay = {
     playback.speed = speed
     music(playback)
   end,
-  -- forward plays fast up to the frame, backward restarts the song and does that
+  -- forward plays fast up to the frame, backward does that from the song's start
   seek = function(frame)
     local p = playback
     frame = math.max(1, math.min(frame, #p.frames))
@@ -313,7 +329,7 @@ phigrospp.replay = {
       p.target = frame
       return music(p)
     end
-    reload(p, frame)
+    rewind(p, frame)
   end,
 }
 
@@ -339,7 +355,7 @@ local blockers, watched
 local function protect(replay)
   watched = replay
   if blockers then return end
-  blockers = { hook(CS.LevelOverControl, "Retry", { before = function() if watched then watchNext = playback.path end end }) }
+  blockers = {}
   for _, saving in ipairs(SAVING) do
     blockers[#blockers + 1] = hook(saving[1], saving[2], { skip = function() return true end })
   end
@@ -355,30 +371,47 @@ local function unprotect()
   blockers = nil
 end
 
+-- whether the song being played counts: a watched replay doesn't, nor a play given counts(false), which from then on
+-- isn't recorded and whose result screen shows without saving
+local uncounted
+function phigrospp.counts(value)
+  if value == false and mode ~= "watch" then
+    mode, uncounted = nil, true
+    protect(false)
+  end
+  return mode ~= "watch" and not uncounted
+end
+
 on("song", function(chart)
-  level, enabled = UE.Object.FindObjectOfType(CS.LevelControl), true
+  level, enabled, uncounted = UE.Object.FindObjectOfType(CS.LevelControl), true, nil
   local path = watchNext
   watchNext = nil
   if path then
     local header, frames = file.decode(phigrospp.read(path))
     moveTouches(header, frames)
-    -- the rate it was played at, which the screen's reported refresh rate isn't always (60 Hz on the tablet at 120)
-    local seconds = 0
-    for _, frame in ipairs(frames) do seconds = seconds + frame.dt end
+    -- the rate it was played at, which the screen's reported refresh rate isn't always (60 Hz on the tablet at 120),
+    -- and the frame its music started at
+    local seconds, first = 0, 1
+    for i, frame in ipairs(frames) do
+      seconds = seconds + frame.dt
+      if frame.t < STARTED then first = i + 1 end
+    end
     local rate = #frames / seconds
     phigrospp.frameRate(rate)
     protect(true)
     quitButton()
-    local r = resume or {}
-    mode, resume = "watch", nil
+    mode = "watch"
     playback = { path = path, header = header, frames = frames, rate = rate, cursor = 0, credit = 0, live = true, extra = 0,
-      speed = r.speed or 1, paused = r.paused or false, target = r.target }
+      speed = 1, paused = false, first = first, fresh = {} }
+    for _, field in ipairs(SCORE) do playback.fresh[field] = level.scoreControl[field] end
+    -- the game stops the music for good where it ends, a replay ends where its frames do and can go back until then
+    level.levelInformation.canLevelOver = false
     -- the first time, it's played through fast and silently, so the seek bar marks every good, bad and miss before it
     -- plays again from its start
     if not judged[path] then
       playback.judging, playback.target = true, #frames - 1
-      local cameras = UE.Camera.allCameras -- nothing of it is drawn, the reload brings them back
-      for i = 0, #cameras - 1 do cameras[i].enabled = false end
+      playback.cameras = UE.Camera.allCameras -- nothing of it is drawn
+      for i = 0, #playback.cameras - 1 do playback.cameras[i].enabled = false end
     end
     print(("replay: watching %s, %d frames"):format(path, #frames))
   else
@@ -412,12 +445,17 @@ on("update", function()
     end
     p.countdown = nil
   end
-  if p.live then p.cursor = p.cursor + 1 end
+  if p.live then
+    p.cursor = p.cursor + 1
+    -- the play jumped there (phigrospp.jump), its music follows
+    if p.cursor > p.first and p.frames[p.cursor].t - p.frames[p.cursor - 1].t > JUMPED then music(p) end
+  end
   if not hooks then serve() end
   if p.extra > 0 then simulate(p, p.extra) end
   if p.judging and p.cursor >= p.target then
-    judged[p.path] = true
-    return reload(p)
+    judged[p.path], p.judging = true, nil
+    for i = 0, #p.cameras - 1 do p.cameras[i].enabled = true end
+    return rewind(p, 1)
   end
   if p.target and p.cursor >= p.target then
     p.target = nil
@@ -493,7 +531,7 @@ end
 
 -- a reload drops the replay's hooks and protection, so the song is left before it can count
 on("unload", function()
-  if mode == "watch" then phigrospp.leave() end
+  if mode == "watch" or uncounted and playing() then phigrospp.leave() end
 end)
 
 on("resume", function()
@@ -515,6 +553,6 @@ hook(CS.SongSelector, "NormalStart", { before = function() watchNext, armed = ar
 
 on("scene", function(name)
   if name ~= "SongSelector" then return end
-  watchNext, resume = nil, nil
+  watchNext = nil
   unprotect()
 end)

@@ -505,7 +505,7 @@ end
 
 on("finish", function(result)
   local chart = playing()
-  if not byId[chart.id] or replaying() then return end
+  if not byId[chart.id] or not phigrospp.counts() then return end
   local key = chart.id .. "." .. chart.difficulty
   local r = progress.records[key] or {}
   progress.records[key] = { score = math.max(r.score or 0, result.score),

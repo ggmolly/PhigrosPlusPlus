@@ -329,7 +329,7 @@ on("song", function() started = now() end)
 -- a song played to its end: the save changes (records, progress) and goes at the next scene change, and a summary of
 -- the play joins the ones waiting, for the player's stats on phigros.tools
 on("finish", function(result)
-  if replaying() or phigrospp.charts.custom(playing().id) then return end
+  if not phigrospp.counts() or phigrospp.charts.custom(playing().id) then return end
   changeSave()
   if not sync() or not profile or not uploadPlays() then return end
   local chart = playing()

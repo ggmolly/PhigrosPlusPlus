@@ -159,6 +159,10 @@ end
 on("update", function()
   local state = replay.state()
   if state and state.judging then return judging() end
+  if cover then
+    if il2cpp.alive(cover) then UE.Object.Destroy(cover) end
+    cover = nil
+  end
   if not state or state.ended then
     if ui and il2cpp.alive(ui.go) then
       ui.go:SetActive(false)

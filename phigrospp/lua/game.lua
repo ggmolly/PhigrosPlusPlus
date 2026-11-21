@@ -3,7 +3,7 @@
 local emit = phigrospp.emit
 local LANGUAGES = { [40] = "chinese", [41] = "chineseTraditional", [10] = "english", [22] = "japanese", [23] = "korean" }
 
-local chart, scorer, paused
+local chart, scorer, paused, stage
 local lines -- the level's judge lines by index, looked for when a hit needs one
 
 function language() return LANGUAGES[CS.MultiLanguageManager.GetCurrentLanguage()] end
@@ -97,7 +97,7 @@ hook(CS.LevelControl, "SortForAllNoteWithTime", {
     chart = { id = info.songsId, name = info.songsName, difficulty = info.songsLevel, level = info.songsDifficulty,
       composer = info.composer, charter = info.charter, illustrator = info.illustrator, mirror = info.mirror,
       notes = level.levelInformation.numOfNotes }
-    scorer, paused, lines = level.scoreControl, false, nil
+    scorer, paused, lines, stage = level.scoreControl, false, nil, level
     emit("song", chart)
   end,
 })
@@ -145,6 +145,53 @@ for method, judgement in pairs({ Perfect = "perfect", Good = "good", Bad = "bad"
       emit("hit", { judgement = judgement, offset = offset, combo = self._combo, note = KINDS[note.type], x = x, y = y })
     end,
   })
+end
+
+-- NoteUpdateManager's notes on the field
+local FIELD = { "clickControls", "dragControls", "holdControls", "flickControls" }
+
+-- every note is made when the song starts and destroyed once judged: going back to t the ones left are destroyed and
+-- those from t on (up to `to`) made again, unjudged
+local function renote(judge, t, to)
+  local Object = CS.UnityEngine.Object
+  for _, name in ipairs(FIELD) do
+    local list = judge.noteUpdateManager[name]
+    for i = 0, list._size - 1 do
+      if il2cpp.alive(list._items[i]) then Object.Destroy(list._items[i].gameObject) end
+    end
+    list:Clear()
+  end
+  local all = judge.judgeLineControls
+  for i = 0, all._size - 1 do
+    local line = all._items[i]
+    line.nowSpeedIndex, line.nowDisappearIndex, line.nowMoveIndex, line.nowRotateIndex = 0, 0, 0, 0
+    for _, above in ipairs({ true, false }) do
+      local notes = above and line.notesAbove or line.notesBelow
+      for n = 0, notes._size - 1 do
+        local note = notes._items[n]
+        local out = note.realTime < t or note.realTime > to
+        note.isJudged, note.isJudgedForFlick = out, false
+        if not out then line:CreateNote(n, above) end
+      end
+    end
+  end
+  -- touches are judged against the notes from the first one left
+  local sorted, first = judge.chartNoteSortByTime, 0
+  while first < sorted._size and sorted._items[first].realTime < t do first = first + 1 end
+  judge.startIndex, judge.endIndex = first, first
+end
+
+-- puts the song being played at t (seconds into the chart) with its music. going forward the game misses the notes
+-- jumped over, going back the notes from t on come back unjudged. the score stays as it is. given `to`, only the
+-- notes from t to there are on the field whichever way it goes, none is missed: a section to practise
+function phigrospp.jump(t, to)
+  local progress = stage.progressControl
+  if to or t < progress.nowTime then renote(progress.judgeControl, t, to or math.huge) end
+  local clip = math.max(0, t + progress._offset)
+  progress.audioSource:Seek(clip)
+  -- audioTime is where the game starts the music again after a pause
+  progress.audioTime, progress.nowTime = clip, t
+  emit("jump", t)
 end
 
 hook(CS.ProgressControl, "Play", {
