@@ -13,10 +13,18 @@ local rect, icon = kit.rect, kit.icon
 
 local ui -- the player of the current song, rebuilt with each song scene
 local shownUntil, dragging = 0, nil
--- the goods (blue, like in the game), bads and misses of each replay watched, by path: { frame, good } marked on the
--- seek bar where they happened. they fill in as the replay plays or seeks, and stay for the next time
-local MARK = { [true] = { 0.63, 0.88, 1, 1 }, [false] = { 1, 0.36, 0.36, 1 } }
+-- the goods (blue, like in the game), bads and misses of each replay watched, by path: { frame, t, judgement } marked
+-- on the seek bar where they happened. they fill in as the replay plays or seeks, and stay for the next time
+local RED = { 1, 0.36, 0.36, 1 }
+local MARK = { good = { 0.63, 0.88, 1, 1 }, bad = RED, miss = RED }
 local marks = {}
+local extras = {} -- the buttons mods add after the player's own: { icon, press }
+
+-- the marks of the replay watched, in the order they happened: { t = song time, judgement = "good", "bad" or "miss" }
+function replay.marks() return marks[replay.state().path] or {} end
+
+-- one more button in the player's row: name is an icon's or svg paths (see phigrospp.ui.icon), a tap runs press()
+function replay.button(name, press) extras[#extras + 1] = { icon = name, press = press } end
 
 local function frameAt(t)
   local frames = replay.state().frames
@@ -65,20 +73,22 @@ local function build()
   p.fill = rect(parent, "phigrospp-seek-fill", { p.bar.x, barY }, { 0, 8 * u }, { 1, 1, 1, 0.9 })
   p.addMark = function(m)
     local x = p.bar.x + p.bar.width * m.frame / #replay.state().frames
-    rect(parent, "phigrospp-seek-mark", { x - u, barY }, { 2 * u, 24 * u }, MARK[m.good])
+    rect(parent, "phigrospp-seek-mark", { x - u, barY }, { 2 * u, 24 * u }, MARK[m.judgement])
   end
   for _, m in ipairs(marks[replay.state().path] or {}) do p.addMark(m) end
 
   local size, gap, rowY = 72 * u, 150 * u, 120 * u
   local names = { "skip-back", "rewind", "play", "fast-forward", "speed" }
-  for i, name in ipairs(names) do
-    local x = width / 2 + (i - (#names + 1) / 2) * gap
-    local button = { name = name, x = x, y = rowY, reach = gap / 2 }
+  local count = #names + #extras
+  for i = 1, count do
+    local name, extra = names[i], extras[i - #names]
+    local x = width / 2 + (i - (count + 1) / 2) * gap
+    local button = { name = name, press = extra and extra.press, x = x, y = rowY, reach = gap / 2 }
     if name == "speed" then
       button.text = label(parent, "phigrospp-speed", { x, rowY }, { gap, size }, 48 * u, 4, { 0.5, 0.5 }) -- MiddleCenter
     else
-      button.image = rect(parent, "phigrospp-" .. name, { x - size / 2, rowY }, { size, size }, { 1, 1, 1, 1 })
-      button.image.sprite = icon(name)
+      button.image = rect(parent, "phigrospp-" .. (name or "extra"), { x - size / 2, rowY }, { size, size }, { 1, 1, 1, 1 })
+      button.image.sprite = icon(extra and extra.icon or name)
     end
     p.buttons[#p.buttons + 1] = button
   end
@@ -126,7 +136,7 @@ local function handle(touch)
   end
   for _, button in ipairs(ui.buttons) do
     if math.abs(x - button.x) < button.reach and math.abs(y - button.y) < button.reach then
-      press(button.name)
+      if button.press then button.press() else press(button.name) end
       -- paused, the player stays until a tap hides it
       if button.name == "play" and replay.state().paused then shownUntil = math.huge end
       return
@@ -208,9 +218,10 @@ on("hit", function(hit)
   if not state or hit.judgement == "perfect" then return end
   local list = marks[state.path] or {}
   marks[state.path] = list
-  local m = { frame = math.max(state.cursor, 1), good = hit.judgement == "good" }
+  local frame = math.max(state.cursor, 1)
+  local m = { frame = frame, t = state.frames[frame].t, judgement = hit.judgement }
   for _, seen in ipairs(list) do
-    if seen.frame == m.frame and seen.good == m.good then return end
+    if seen.frame == m.frame and seen.judgement == m.judgement then return end
   end
   list[#list + 1] = m
   if ui and il2cpp.alive(ui.go) then ui.addMark(m) end

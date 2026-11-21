@@ -331,6 +331,11 @@ phigrospp.replay = {
     end
     rewind(p, frame)
   end,
+  -- the song again from its start for the player to play, loaded like the pause menu's Retry does
+  takeover = function()
+    playback.taken = true
+    UE.SceneManagement.SceneManager.LoadScene("Level")
+  end,
 }
 
 -- every step of the result screen that saves or unlocks something (LevelOverControl.<Start>d__43.MoveNext calls
@@ -541,7 +546,7 @@ end)
 -- a replay restarted from the game's pause menu is watched again, the song list forgets it
 on("leave", function()
   if mode == "watch" then
-    watchNext = watchNext or playback.path
+    if not playback.taken then watchNext = watchNext or playback.path end
     phigrospp.frameRate()
   end
   unserve()
