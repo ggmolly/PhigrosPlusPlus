@@ -91,52 +91,63 @@ end
 local function why(status, body)
   local code = json.decode(body).code
   if code == "no-name" then
-    return "Choose a name first", "phigros.tools shows the name you have in Phigros. Tap Edit on your profile to "
-        .. "choose one, and sync turns on once you save it.", true
+    return "Choose a name", "phigros.tools shows the name you have in Phigros. Choose one, Phigros shows it too.", true
   elseif code == "name-full" then
-    return "This name is taken", ("Every number for %s is already used on phigros.tools. Tap Edit on your profile "
-        .. "to choose another name, and sync turns on once you save it."):format(name), true
+    return "This name is taken", ("Every number for %s is already used on phigros.tools. Choose another name, "
+        .. "Phigros shows it too."):format(name), true
   end
   return "Couldn't reach phigros.tools", ("Check your connection, then turn sync on again (%d)."):format(status)
 end
 
-local PROFILE_TAB = 1 -- the game's settings tabs are Gameplay, Profile and Misc.
-local choosing -- the name refused, while waiting on the profile tab for the player to save another one
+-- the game's name is kept outside the save (playerID), so a fresh install stays GUEST whatever save it loads: this
+-- sets it as renaming on the profile tab does
+local function rename(new)
+  CS.GameInformation.SetUserName(new)
+  name = new
+end
+
+local function askName(title, message)
+  local ok, typed = ui.confirm({ title = title, message = message, input = "Name", yes = "Save", no = "Cancel" })
+  typed = ok and typed:match("^%s*(.-)%s*$")
+  if not typed or typed == "" or typed == "GUEST" then return false end
+  rename(typed)
+  return true
+end
+
 local forceSync -- sends everything, defined with its button below
 
--- signing up: a new key's words come first, and only once the player saved them is it registered under the game's
--- name and written to the device. cancelling drops it. a refused sign up keeps it in memory, so a retry shows the
--- same words, and a refused name opens the profile tab to pick another
+-- signing up: a guest chooses a name first, then a new key's words come, and only once the player saved them is it
+-- registered under the game's name and written to the device. cancelling drops it. a refused sign up keeps it in
+-- memory, so a retry shows the same words, and a refused name asks for another
 local function join()
   -- the game may not have read them since loading, the settings screen's profile tab shows them
   local stats = UE.Object.FindObjectOfType(CS.StatsFrameController)
   name = name or stats.playerName.text
   intro = intro or (stats.selfIntro.text == PLACEHOLDER and "" or stats.selfIntro.text)
-  local first, now = not profile, current()
-  local sent = now.name
-  if first and sent and sent ~= "GUEST" then
+  if name == "GUEST" and not askName(why(400, '{"code":"no-name"}')) then return sync(false) end
+  local first = not profile
+  if first then
     if not identity.public() then identity.create() end
     if not showPhrase(true) then
       identity.forget()
       return sync(false)
     end
   end
-  local status, body = 400, '{"code":"no-name"}'
-  if sent and sent ~= "GUEST" then
-    status, body = call("PUT", "/api/profile", json.encode(now))
-  end
-  if status == 200 then
-    if first then identity.save() end
-    sync(true)
-    saveProfile(json.decode(body), now)
-    return forceSync()
-  end
-  sync(false)
-  local title, message, naming = why(status, body)
-  if ui.confirm({ title = title, message = message, yes = naming and "Choose a name" or "OK", no = naming and "Cancel" or false })
-      and naming then
-    choosing = sent or "GUEST"
-    UE.Object.FindObjectOfType(CS.Setting):ChangeTab(PROFILE_TAB)
+  while true do
+    local now = current()
+    local status, body = call("PUT", "/api/profile", json.encode(now))
+    if status == 200 then
+      if first then identity.save() end
+      sync(true)
+      saveProfile(json.decode(body), now)
+      return forceSync()
+    end
+    local title, message, naming = why(status, body)
+    if not naming then
+      sync(false)
+      return ui.confirm({ title = title, message = message, yes = "OK", no = false })
+    end
+    if not askName(title, message) then return sync(false) end
   end
 end
 
@@ -147,9 +158,6 @@ on("setting", function(label, value)
   if label == "Sync to phigros.tools" and value then return coroutine.wrap(join)() end
   update()
 end)
-
--- leaving the settings screen stops waiting for a name
-on("scene", function() choosing = nil end)
 
 -- a profile changed in the game goes to phigros.tools. a refused name isn't sent again until the next rename, the
 -- rest goes with the name the server has
@@ -184,10 +192,6 @@ end
 hook(CS.GameInformation, "GetUserName", {
   after = function(result)
     name = result
-    if choosing and result ~= choosing and result ~= "GUEST" then
-      choosing = nil
-      return coroutine.wrap(join)()
-    end
     update()
   end,
 })
@@ -407,6 +411,7 @@ local function offerSave(fromSite)
   IO.Directory.CreateDirectory(SAVE)
   for _, module in ipairs(MODULES) do phigrospp.write(SAVE .. module, files[module]) end
   CS.CloudSaveManager.LoadFromFolder(SAVE, true, (there or here).SaveVersion)
+  rename(profile.name)
   UE.PlayerPrefs.Save()
   ui.confirm({ title = "Save loaded", message = "Phigros++ closes to finish loading it, open it again.", yes = "OK",
     no = false })
@@ -437,6 +442,7 @@ local function restored(body, linked)
   identity.save()
   -- nothing counts as sent, so this device's profile goes to phigros.tools as the game shows it
   saveProfile(json.decode(body), { name = "", intro = "", avatar = "", background = "", unlisted = false }, linked)
+  if CS.GameInformation.GetUserName() == "GUEST" then rename(profile.name) end
   sync(true)
   toast("Welcome back, " .. tag())
   phigrospp.write(OFFER, "")
