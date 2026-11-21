@@ -1,6 +1,8 @@
 -- on a rooted device, a fresh install offers once to take the save of Phigros installed next to it: its PlayerPrefs
 -- file is copied as root over Phigros++'s own, then the app is killed, since quitting would write its prefs back over it
 
+if phigrospp.platform ~= "android" then return end
+
 local UE = CS.UnityEngine
 local ASKED = phigrospp.root .. "/import-asked"
 local GAME = "/data/data/com.PigeonGames.Phigros/shared_prefs/com.PigeonGames.Phigros.v2.playerprefs.xml"
