@@ -4,7 +4,7 @@
 local enabled = setting("Instant restart", true)
 local HOLD = 0.3 -- seconds the pause button is held to restart
 
-local progress, held -- the song's ProgressControl, and the finger on the pause button with when it came
+local progress -- the song's ProgressControl
 
 -- the pause menu's Retry (Pause.Update) is the only LoadScene("Level") while a song is played
 hook(CS.UnityEngine.SceneManagement.SceneManager, "LoadScene", { "System.String" }, {
@@ -16,18 +16,8 @@ hook(CS.UnityEngine.SceneManagement.SceneManager, "LoadScene", { "System.String"
 })
 
 on("song", function() progress = CS.UnityEngine.Object.FindObjectOfType(CS.ProgressControl) end)
-on("leave", function() progress, held = nil, nil end)
+on("leave", function() progress = nil end)
 
-on("update", function()
-  if not progress or not progress.isPlaying or replaying() or not enabled() then return end
-  local still
-  for _, t in ipairs(touches()) do
-    if held and t.id == held.id and t.phase ~= 3 and t.phase ~= 4 then still = true end -- not Ended or Canceled
-    if t.phase == 0 and phigrospp.pauseButton(t.x, t.y) then held, still = { id = t.id, since = now() }, true end -- Began
-  end
-  if not still then held = nil end
-  if held and now() - held.since >= HOLD then
-    held = nil
-    phigrospp.restart()
-  end
-end)
+phigrospp.hold(function(x, y)
+  return progress and progress.isPlaying and not replaying() and enabled() and phigrospp.pauseButton(x, y)
+end, HOLD, phigrospp.restart)
