@@ -4,6 +4,10 @@ local emit = phigrospp.emit
 local LANGUAGES = { [40] = "chinese", [41] = "chineseTraditional", [10] = "english", [22] = "japanese", [23] = "korean" }
 
 local chart, scorer, paused, stage
+-- what ScoreControl counts of a play, and those counts as the song started
+local SCORE = { "_score", "_percent", "_combo", "maxcombo", "perfect", "good", "bad", "miss", "early", "late",
+  "isAllPerfect", "isFullCombo" }
+local fresh
 local lines -- the level's judge lines by index, looked for when a hit needs one
 
 function language() return LANGUAGES[CS.MultiLanguageManager.GetCurrentLanguage()] end
@@ -98,6 +102,8 @@ hook(CS.LevelControl, "SortForAllNoteWithTime", {
       composer = info.composer, charter = info.charter, illustrator = info.illustrator, mirror = info.mirror,
       notes = level.levelInformation.numOfNotes }
     scorer, paused, lines, stage = level.scoreControl, false, nil, level
+    fresh = {}
+    for _, field in ipairs(SCORE) do fresh[field] = scorer[field] end
     emit("song", chart)
   end,
 })
@@ -192,6 +198,40 @@ function phigrospp.jump(t, to)
   -- audioTime is where the game starts the music again after a pause
   progress.audioTime, progress.nowTime = clip, t
   emit("jump", t)
+end
+
+-- puts the song being played back at its start in place, every note unjudged and nothing scored. the game then
+-- waits before the music like a fresh start does, a replay plays its own recorded start instead
+function phigrospp.restart()
+  local progress = stage.progressControl
+  if not replaying() and progress.isPlaying then progress:Play(false) end -- the music stops as the pause button does
+  phigrospp.jump(0)
+  for _, field in ipairs(SCORE) do scorer[field] = fresh[field] end
+  scorer._noteCodes:Clear()
+  if scorer.comboBlocked then scorer:UnblockCombo() end -- Petrichor's blocks lock the combo when touched
+  local blocks = progress.judgeControl.previewElementUpdateControl
+  if blocks.HasBlocks then blocks:DestroyAndCreateAllBlocks() end -- the ones gone by come back
+  if not replaying() then
+    -- Play(true) has ProgressControl.Update wait 1.5 s at a first launch, 3 s (the 3, 2, 1) after a pause. the seek
+    -- started the music's clock again, Pause stops it until the music is scheduled
+    progress.audioSource:Pause()
+    progress._isFirstTimeLaunch = true
+    progress:Play(true)
+    progress.pauseBar:SetActive(false)
+    progress.pauseCamera.enabled = false
+    progress.judgeControl.pauseTime = 0 -- the ring a first tap on the pause button shows
+  end
+  emit("restart")
+end
+
+-- whether a point of the screen (pixels) is on the pause button of the song being played
+function phigrospp.pauseButton(x, y)
+  local icon = stage.judgeControl.pauseRing.transform.parent
+  local canvas = icon:GetComponentInParent(il2cpp.typeof(CS.UnityEngine.Canvas), true)
+  local camera = canvas.renderMode ~= 0 and canvas.worldCamera or nil -- ScreenSpaceOverlay has none
+  local at = CS.UnityEngine.RectTransformUtility.WorldToScreenPoint(camera, icon.position)
+  local reach = 100 * CS.UnityEngine.Screen.height / 1080
+  return math.abs(x - at.x) < reach and math.abs(y - at.y) < reach
 end
 
 hook(CS.ProgressControl, "Play", {

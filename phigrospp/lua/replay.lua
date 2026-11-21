@@ -22,7 +22,7 @@ local armed, watchNext -- the replay the next song start watches
 local whose -- the name#number of the player of the replay started from the song list
 local judged = {} -- the replays (by path) played through once since the game started, see on("song")
 local recorded, events, kept -- recording, and the play just kept until its result screen compares it with the record
-local playback, serving, hooks, simulating, enabled, cross, quit -- watching
+local playback, serving, hooks, simulating, enabled, cross -- watching
 
 local function folder(id, difficulty) return ("%s/%s.%s"):format(DIR, id, difficulty) end
 
@@ -179,18 +179,11 @@ local function still(frame)
   return { t = frame.t, dt = frame.dt, touches = list, structs = structs(list) }
 end
 
--- the game's pause button is a cross while watching: quit(position) is whether a real tap is on it
+-- the game's pause button is a cross while watching, a real tap on it quits
 local function quitButton()
   local icon = level.judgeControl.pauseRing.transform.parent
   icon:GetComponent(UE.UI.Image).sprite = phigrospp.ui.icon("x")
-  local canvas = icon:GetComponentInParent(il2cpp.typeof(UE.Canvas), true)
-  local camera = canvas.renderMode ~= 0 and canvas.worldCamera or nil -- ScreenSpaceOverlay has none
-  local reach = 100 * Screen.height / 1080
   cross = icon:GetComponent(UE.RectTransform)
-  quit = function(position)
-    local at = UE.RectTransformUtility.WorldToScreenPoint(camera, icon.position)
-    return math.abs(position.x - at.x) < reach and math.abs(position.y - at.y) < reach
-  end
 end
 
 local function unserve()
@@ -254,17 +247,10 @@ local function plan(p)
   setJudging(p.live)
 end
 
--- what ScoreControl counts of a play
-local SCORE = { "_score", "_percent", "_combo", "maxcombo", "perfect", "good", "bad", "miss", "early", "late",
-  "isAllPerfect", "isFullCombo" }
-
 -- the song back at its start, every note unjudged and nothing scored, then played fast up to target. the frames from
 -- before the music started are always passed, the music only follows a replay once it plays
 local function rewind(p, target)
-  phigrospp.jump(0)
-  local score = level.scoreControl
-  for _, field in ipairs(SCORE) do score[field] = p.fresh[field] end
-  score._noteCodes:Clear()
+  phigrospp.restart()
   p.cursor, p.credit, p.extra, p.live, p.target = 0, 0, 0, true, math.max(target, p.first)
   serving = p.frames[1]
   serving.structs = structs(serving.touches)
@@ -407,8 +393,7 @@ on("song", function(chart)
     quitButton()
     mode = "watch"
     playback = { path = path, header = header, frames = frames, rate = rate, cursor = 0, credit = 0, live = true, extra = 0,
-      speed = 1, paused = false, first = first, fresh = {} }
-    for _, field in ipairs(SCORE) do playback.fresh[field] = level.scoreControl[field] end
+      speed = 1, paused = false, first = first }
     -- the game stops the music for good where it ends, a replay ends where its frames do and can go back until then
     level.levelInformation.canLevelOver = false
     -- the first time, it's played through fast and silently, so the seek bar marks every good, bad and miss before it
@@ -440,7 +425,7 @@ on("update", function()
   if not p or p.ended then return end
   for i = 0, Input.touchCount - 1 do
     local touch = Input.GetTouch(i)
-    if touch.m_Phase == 0 and quit(touch.m_Position) then return phigrospp.leave() end -- Began
+    if touch.m_Phase == 0 and phigrospp.pauseButton(touch.m_Position.x, touch.m_Position.y) then return phigrospp.leave() end -- Began
   end
   -- resumed from the game's pause menu, the song stands still until the music plays again after its 3, 2, 1
   if p.countdown then
@@ -486,6 +471,11 @@ for _, kind in ipairs({ "pause", "resume" }) do
     if mode == "record" then events[#events + 1] = { kind = kind, frame = #recorded, mono = math.floor(now() * 1e6 + 0.5) } end
   end)
 end
+
+-- a play restarted in place is recorded from its new start
+on("restart", function()
+  if mode == "record" then recorded, events = {}, {} end
+end)
 
 -- a watched replay checks it gave the recorded result, a recorded play is written with its result
 on("finish", function(result)

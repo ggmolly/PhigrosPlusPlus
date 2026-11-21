@@ -324,7 +324,9 @@ on("best", function(path)
   flush()
 end)
 
-on("song", function() started = now() end)
+local function start() started = now() end
+on("song", start)
+on("restart", start)
 
 -- a song played to its end: the save changes (records, progress) and goes at the next scene change, and a summary of
 -- the play joins the ones waiting, for the player's stats on phigros.tools

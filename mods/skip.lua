@@ -75,16 +75,21 @@ local function build()
   return { group = group, alpha = 0, x = x, y = y, width = width, reach = height }
 end
 
-on("song", function(chart)
-  pill, level = nil, enabled() and UE.Object.FindObjectOfType(CS.LevelControl)
-  if not level then return end
-  left, intro = chart.notes, nil
+-- the notes left and where a tap in the intro goes, from the song's start
+local function start()
+  left, intro = playing().notes, nil
   local first = level.levelInformation.chartNoteSortByTime._items[0].realTime
   if first < INTRO then return end
   local shows = entrance(first)
   local target = shows and shows - LEAD or first - FALLBACK
   if target >= 1 then intro = target end
+end
+
+on("song", function()
+  pill, level = nil, enabled() and UE.Object.FindObjectOfType(CS.LevelControl)
+  if level then start() end
 end)
+on("restart", function() if level then start() end end)
 
 on("hit", function() if level then left = left - 1 end end)
 on("leave", function() level = nil end)
