@@ -9,22 +9,28 @@
 -- positions are on the 1/1024 pixel grid Unity reports them on
 -- event: { kind = "pause" or "resume", frame = frames recorded before it, mono = when }, nothing is recorded in a pause
 
-local MAGIC, VERSION = "PIGEON", 5
-local DOMAIN = "phigros++ replay v5\0" -- what the signature is of, before the file's bytes
+local MAGIC, VERSION = "PIGEON", 6
 -- the header, in order: the chart, the screen it was played on, when, the result (the picker reads only this), then
 -- what it was played with: the game (its update count), phigros++, the device, its android version and refresh rate,
 -- the target frame rate, the song's offset in seconds, every mods/ and core/ file with the start of its sha-512, and
--- what the game's judgement depends on: the screen's dpi (flicks), mirror mode and challenge mode (1 when on)
+-- what the game's judgement depends on: the screen's dpi (flicks), mirror mode and challenge mode (1 when on), the
+-- modifiers it was played with (their bits, modifiers.lua) and the seed Random shuffled the chart from
 local FIELDS = {
   { "version", "B" }, { "id", "s1" }, { "difficulty", "s1" }, { "width", "I2" }, { "height", "I2" }, { "date", "i8" },
   { "score", "i4" }, { "accuracy", "f" }, { "maxcombo", "I2" }, { "perfect", "I2" }, { "good", "I2" },
   { "bad", "I2" }, { "miss", "I2" }, { "early", "I2" }, { "late", "I2" }, { "duration", "f" },
   { "game", "I4" }, { "phigrospp", "s1" }, { "device", "s1" }, { "android", "s1" }, { "refresh", "d" },
   { "fps", "i2" }, { "offset", "f" }, { "files", "s2" }, { "dpi", "f" }, { "mirror", "B" }, { "challenge", "B" },
+  { "mods", "I4" }, { "seed", "I4" },
 }
 local EVENTS = { "pause", "resume" }
-local HEADER = "<c6"
-for _, field in ipairs(FIELDS) do HEADER = HEADER .. field[2] end
+-- the header's format by version: 5 has no modifiers, so not the last two fields, and the same frames. a play without
+-- modifiers is still written as 5, which every Phigros++ and phigros.tools since reads
+local HEADERS = {}
+for version, fields in pairs({ [5] = #FIELDS - 2, [VERSION] = #FIELDS }) do
+  HEADERS[version] = "<c6"
+  for i = 1, fields do HEADERS[version] = HEADERS[version] .. FIELDS[i][2] end
+end
 local BITS, LIMIT, MANT = 15, 30, 16 -- probability precision, slowest adaptation 1/32, adaptive bits under the top one
 local ONE, TOP, MASK = 1 << BITS, 1 << 24, 0xFFFFFFFF
 local ENDED, CANCELED = 3, 4 -- TouchPhase
@@ -331,31 +337,34 @@ local function frames(c, list, events)
   return out, happened
 end
 
+-- the version of a replay's data, false for anything else
+local function version(data) return data:sub(1, #MAGIC) == MAGIC and data:byte(#MAGIC + 1) end
+
 -- the header as a table of FIELDS, and where the frames start
 local function header(data)
-  local values = table.pack(HEADER:unpack(data))
-  assert(values[1] == MAGIC and values[2] == VERSION, "replay: not a Phigros++ replay of this version")
-  local h = {}
-  for i, field in ipairs(FIELDS) do h[field[1]] = values[i + 1] end
-  return h, values[#FIELDS + 2]
+  local format = assert(HEADERS[version(data)], "replay: not a Phigros++ replay of a version this one reads")
+  local values = table.pack(format:unpack(data)) -- the magic, the fields, where they end
+  local h = { mods = 0, seed = 0 }
+  for i = 1, #values - 2 do h[FIELDS[i][1]] = values[i + 1] end
+  return h, values[#values]
 end
 
 phigrospp.replayfile = {
   -- whether the data is a replay this version reads
-  current = function(data) return data:sub(1, #MAGIC) == MAGIC and data:byte(#MAGIC + 1) == VERSION end,
+  current = function(data) return HEADERS[version(data)] ~= nil end,
   header = function(data) return (header(data)) end,
   encode = function(h, list, events)
     local values = {}
     for i, field in ipairs(FIELDS) do values[i] = h[field[1]] end
-    values[1] = VERSION
+    values[1] = h.mods == 0 and 5 or VERSION
     local c = coder()
     frames(c, list, events)
-    return HEADER:pack(MAGIC, table.unpack(values, 1, #FIELDS)) .. c:finish()
+    return HEADERS[values[1]]:pack(MAGIC, table.unpack(values, 1, #FIELDS)) .. c:finish() -- 5 leaves the last two
   end,
-  -- the replay as it's uploaded, signed with the player's key
+  -- the replay as it's uploaded, signed with the player's key. what's signed starts with the file's version
   sign = function(data)
     local identity = phigrospp.identity
-    return data .. identity.public() .. identity.sign(DOMAIN .. data)
+    return data .. identity.public() .. identity.sign(("phigros++ replay v%d"):format(version(data)) .. "\0" .. data)
   end,
   -- the header, frames and events
   decode = function(data)
