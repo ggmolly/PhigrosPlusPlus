@@ -4,6 +4,7 @@ local emit = phigrospp.emit
 local LANGUAGES = { [40] = "chinese", [41] = "chineseTraditional", [10] = "english", [22] = "japanese", [23] = "korean" }
 
 local chart, scorer, paused, stage
+local speed, clock, ticking = 1 -- phigrospp.speed: how fast the song runs, its clock and the hook giving it to the game
 -- what ScoreControl counts of a play, and those counts as the song started
 local SCORE = { "_score", "_percent", "_combo", "maxcombo", "perfect", "good", "bad", "miss", "early", "late",
   "isAllPerfect", "isFullCombo" }
@@ -111,7 +112,8 @@ hook(CS.LevelControl, "SortForAllNoteWithTime", {
 hook(CS.LevelControl, "OnDestroy", {
   before = function()
     if not chart then return end
-    chart, scorer = nil, nil
+    chart, scorer, speed = nil, nil, 1
+    if ticking then ticking = unhook(ticking) end
     emit("leave")
   end,
 })
@@ -196,8 +198,34 @@ function phigrospp.jump(t, to)
   local clip = math.max(0, t + progress._offset)
   progress.audioSource:Seek(clip)
   -- audioTime is where the game starts the music again after a pause
-  progress.audioTime, progress.nowTime = clip, t
+  progress.audioTime, progress.nowTime, clock = clip, t, clip
   emit("jump", t)
+end
+
+-- the game's time is the music's, read from a clock that doesn't follow its pitch: at another speed ours is given
+-- instead, before the game reads it. AudioSource.time follows the pitch but moves a buffer at a time, so ours runs by
+-- itself, pulled to it while the music plays (once it ended the game still counts up to the level's end). a watched
+-- replay has its own times
+local function tick(progress)
+  local music = progress.audioSource
+  if not progress.isPlaying or music.CurrentStatus ~= 0 or replaying() then return end
+  local source = music.audioSource
+  clock = clock + CS.UnityEngine.Time.deltaTime * speed
+  if source.isPlaying then
+    local heard = source.time
+    clock = math.abs(heard - clock) > 0.12 and heard or clock + (heard - clock) * 0.05
+  end
+  music.time = clock
+end
+
+-- how fast the song being played runs, 1 as the game plays it: its music (the pitch follows) and its notes. given a
+-- speed, the song takes it until it's left
+function phigrospp.speed(x)
+  if not x then return speed end
+  local music = stage.progressControl.audioSource
+  speed, clock, music.audioSource.pitch = x, music.time, x
+  if ticking and x == 1 then ticking = unhook(ticking) end
+  if not ticking and x ~= 1 then ticking = hook(CS.ProgressControl, "Update", { before = tick }) end
 end
 
 -- puts the song being played back at its start in place, every note unjudged and nothing scored. the game then

@@ -48,8 +48,17 @@ end)
 -- the game's Button calls listeners we can't make from lua, so clicks on buttons we made are caught here. a button's
 -- function runs in a coroutine, so it can wait for a choice in a dialog (phigrospp.ui.confirm)
 local clicks = {}
+-- what phigrospp.hold waits on: buttons (since when a finger is down on each), and places of the screen
+local holds, places = {}, {}
 
 function phigrospp.click(button, fn) clicks[button] = fn end
+
+-- fn runs, like a click's, once a finger stayed `seconds` on target: a Button of the game's UI, which then doesn't
+-- get the click of that finger's release, or a function(x, y) saying whether a point of the screen (pixels) is on it
+function phigrospp.hold(target, seconds, fn)
+  local held = { on = target, seconds = seconds, fn = fn }
+  if type(target) == "function" then places[#places + 1] = held else holds[target] = held end
+end
 
 local function resume(co, ...)
   local ok, err = coroutine.resume(co, ...)
@@ -58,16 +67,55 @@ end
 
 -- the game checks interactable after this hook runs
 hook(UE.UI.Button, "OnPointerClick", {
-  before = function(clicked)
+  skip = function(clicked)
+    if holds[clicked] and holds[clicked].fired then return true end
     local click = clicks[clicked]
     if click and clicked:IsInteractable() then resume(coroutine.create(click)) end
+    return false
   end,
 })
 
+hook(UE.UI.Selectable, "OnPointerDown", {
+  before = function(pressed)
+    local held = holds[pressed]
+    if held then held.since, held.fired = now(), false end
+  end,
+})
+hook(UE.UI.Selectable, "OnPointerUp", {
+  before = function(released)
+    if holds[released] then holds[released].since = nil end
+  end,
+})
+
+on("update", function()
+  for _, held in pairs(holds) do
+    if held.since and now() - held.since >= held.seconds then
+      held.since, held.fired = nil, true
+      resume(coroutine.create(held.fn))
+    end
+  end
+  if #places == 0 or UE.Input.touchCount == 0 then return end
+  local fingers = touches()
+  for _, held in ipairs(places) do
+    local still
+    for _, t in ipairs(fingers) do
+      if t.id == held.id and t.phase ~= 3 and t.phase ~= 4 then still = true end -- not Ended or Canceled
+      if t.phase == 0 and held.on(t.x, t.y) then held.id, held.since, still = t.id, now(), true end -- Began
+    end
+    if not still then held.id = nil end
+    if held.id and now() - held.since >= held.seconds then
+      held.id = nil
+      resume(coroutine.create(held.fn))
+    end
+  end
+end)
+
 -- buttons that died with their scene are forgotten
 on("scene", function()
-  for button in pairs(clicks) do
-    if not il2cpp.alive(button) then clicks[button] = nil end
+  for _, buttons in ipairs({ clicks, holds }) do
+    for button in pairs(buttons) do
+      if not il2cpp.alive(button) then buttons[button] = nil end
+    end
   end
 end)
 
@@ -277,8 +325,28 @@ function phigrospp.sprite(n, shape)
   return phigrospp.asset(UE.Sprite.Create(texture, { 0, 0, n, n }, { 0.5, 0.5 }))
 end
 
--- the open dialog's bar, redrawn every frame, and what closes it
+-- what the open dialog redraws every frame (its bar, its tiles), and what closes it
 local drawBar, closeDialog
+local DARK = { 0.02, 0.13, 0.17, 1 } -- what's drawn on a lit tile
+
+-- a tile of a dialog's grid: a plate to tap, an icon over a label and a note. returns what repaints it, lit in its
+-- colour while cell.on() says so
+local function tile(parent, font, cell, pos, size)
+  local ui = phigrospp.ui
+  local plate = ui.rect(parent, "phigrospp-dialog-tile", pos, size, { 1, 1, 1, 1 }, { 0, 0 })
+  plate.raycastTarget = true
+  phigrospp.click(plate.gameObject:AddComponent(UE.UI.Button), cell.tap)
+  local icon = ui.rect(plate.transform, "Icon", { size[1] / 2, size[2] - 14 }, { 76, 76 }, cell.colour, { 0.5, 1 })
+  icon.sprite = cell.icon
+  local label = ui.text(plate.transform, "Label", font, { size[1] / 2, 46 }, { size[1], 36 }, 30, 4, { 0.5, 0 })
+  local note = ui.text(plate.transform, "Note", font, { size[1] / 2, 12 }, { size[1], 30 }, 24, 4, { 0.5, 0 })
+  label.text = cell.label
+  return function()
+    local lit = cell.on()
+    plate.color, icon.color = lit and cell.colour or { 1, 1, 1, 0.08 }, lit and DARK or cell.colour
+    label.color, note.color, note.text = lit and DARK or { 1, 1, 1, 1 }, lit and DARK or { 1, 1, 1, 0.6 }, cell.note()
+  end
+end
 -- the panels, lists and videos of phigrospp.ui that are on screen
 local panels, lists, videos = {}, {}, {}
 local SLIDE = 0.35 -- seconds a panel takes to come and go
@@ -431,7 +499,9 @@ phigrospp.ui = {
   end,
   -- a dialog made from the game's own confirmation popup (the cloud save one): { title =, message =, yes =,
   -- danger = true for a red yes, no = false for yes alone (yes = false for no alone), grid = { cells =, columns = }
-  -- texts in aligned columns under the message (one column centered), input = a text box's placeholder, its text
+  -- texts in aligned columns under the message (one column centered), a cell being false for none or a tile to tap
+  -- { icon = a Sprite, label =, colour =, tap = what a tap runs, on = whether it's lit and note = the text under
+  -- its label, both functions asked every frame } in rows grid.height high, input = a text box's placeholder, its text
   -- returned after the choice, progress = a function returning how much is done (0 to 1) and the message, a bar
   -- redrawn every frame }. called from a coroutine (a button's function is one), it waits and returns whether yes was
   -- picked
@@ -462,18 +532,28 @@ phigrospp.ui = {
     message.text, message.horizontalOverflow = options.message, 0 -- Wrap
     local height = math.max(LINE, message.preferredHeight)
     if options.grid then
-      local cells, columns = options.grid.cells, options.grid.columns
+      local cells, columns, high = options.grid.cells, options.grid.columns, options.grid.height or ROW
       local rows, width = math.ceil(#cells / columns), subtitle.rect.m_Width / columns
+      local tiles = {}
       -- the message keeps the top of the subtitle, the cells fill the space added under it
       message.alignment = 0 -- UpperLeft
       for i, cell in ipairs(cells) do
-        local column, row = (i - 1) % columns, (i - 1) // columns
-        -- one column has nothing to line up with, so it's centered
-        local text = phigrospp.ui.text(subtitle, "phigrospp-dialog-cell", message.font, { column * width, (rows - 1 - row) * ROW },
-          { width, ROW }, 44, columns == 1 and 4 or 3, { 0, 0 }) -- MiddleCenter, MiddleLeft
-        text.text, text.fontStyle = cell, 1 -- Bold
+        local pos = { (i - 1) % columns * width, (rows - 1 - (i - 1) // columns) * high }
+        if type(cell) == "table" then
+          tiles[#tiles + 1] = tile(subtitle, message.font, cell, pos, { width - GAP / 2, high - GAP / 2 })
+        elseif cell then
+          -- one column has nothing to line up with, so it's centered
+          local text = phigrospp.ui.text(subtitle, "phigrospp-dialog-cell", message.font, pos, { width, high }, 44,
+            columns == 1 and 4 or 3, { 0, 0 }) -- MiddleCenter, MiddleLeft
+          text.text, text.fontStyle = cell, 1 -- Bold
+        end
       end
-      height = height + GAP + rows * ROW
+      if #tiles > 0 then
+        drawBar = function()
+          for _, paint in ipairs(tiles) do paint() end
+        end
+      end
+      height = height + GAP + rows * high
     end
     -- a text box under the message, the game opens its keyboard when it's tapped
     local field

@@ -443,13 +443,14 @@ hook(CS.SongsItem, "GetLevelStartInfo", {
 hook(CS.DoppelgangerLevelEffect, "TryStripHdUnlockNote", {
   before = function(chart, info)
     local s = byId[info.songsId]
-    if not s then return end
-    for _, l in ipairs(s.levels) do
+    for _, l in ipairs(s and s.levels or {}) do
       if l.name == info.songsLevel then
         UE.JsonUtility.FromJsonOverwrite(phigrospp.phc(phigrospp.read(l.chart.path)), chart)
       end
     end
-    if info.mirror then chart:Mirror() end
+    if s and info.mirror then chart:Mirror() end
+    -- any song's Chart as it's about to be played: loaded, mirrored, and not laid out for the screen yet
+    phigrospp.emit("chart", chart)
   end,
 })
 
@@ -505,7 +506,7 @@ end
 
 on("finish", function(result)
   local chart = playing()
-  if not byId[chart.id] or not phigrospp.counts() then return end
+  if not byId[chart.id] or not phigrospp.counts() or phigrospp.modifiers.play() ~= 0 then return end
   local key = chart.id .. "." .. chart.difficulty
   local r = progress.records[key] or {}
   progress.records[key] = { score = math.max(r.score or 0, result.score),
