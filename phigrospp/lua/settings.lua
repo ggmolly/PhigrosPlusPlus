@@ -447,7 +447,9 @@ local function addTab(screen, name, index)
 
   if tabs[name].draw then
     local view = content.parent.parent
-    UE.Object.DestroyImmediate(view:GetComponent(UE.UI.ScrollRect)) -- the tab scrolls what it draws itself
+    -- the tab scrolls what it draws itself
+    UE.Object.DestroyImmediate(view:GetComponent(CS.SettingFrameScrollControl))
+    UE.Object.DestroyImmediate(view:GetComponent(UE.UI.ScrollRect))
     -- what holds the pages sits right of the screen's middle, clear of the back button. what's drawn gets an area as
     -- high as the game's list but centred on the screen, like the panel behind the pages: it grows left by how much
     -- further that holder is from the left edge than from the right one. drawn a frame later: a screen that just
