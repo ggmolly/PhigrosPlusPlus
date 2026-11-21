@@ -2,7 +2,7 @@
 
 APKS ?= ../apks/Phigros-4.1.0
 # a folder holding the game's decrypted Phigros.ipa, for make ipa
-IPA ?= ../apks/Phigros-ios-4.0.3
+IPA ?= ../apks/Phigros-ios-4.0.4
 # Phigros++ installs as its own app, next to the game
 export PACKAGE := sh.molly.phigrosplusplus
 LIB := build/libphigrospp.so
