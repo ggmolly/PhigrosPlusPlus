@@ -1,4 +1,4 @@
-// ios: scripts/patch_ipa.py makes UnityFramework load phigros++, so it runs before il2cpp starts, and prepares the
+// ios: scripts/ipa.ts makes UnityFramework load phigros++, so it runs before il2cpp starts, and prepares the
 // methods it may hook as ios forbids writing code. other methods need JIT (StikDebug, AltStore...) and dobby
 #include <dlfcn.h>
 #include <libkern/OSCacheControl.h>
@@ -90,7 +90,7 @@ int DobbyCodePatch(void *address, uint8_t *buffer, uint32_t size) {
   return 0;
 }
 
-// the hooks patch_ipa.py wrote need no JIT: such a method starts with "b stub", and the stub
+// the hooks scripts/ipa.ts wrote need no JIT: such a method starts with "b stub", and the stub
 // (adrp x16 / ldr x16 / cbz x16 / br x16) jumps to its slot's address or, while it's 0, runs the method
 static bool jit;
 

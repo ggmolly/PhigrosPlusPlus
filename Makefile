@@ -1,21 +1,21 @@
 # phigros++ development against the device plugged in over adb, see the wiki's Development page
 
 APKS ?= ../apks/Phigros-4.1.0
-# a folder holding the game's decrypted Phigros.ipa, for make ipa
-IPA ?= ../apks/Phigros-ios-4.0.4
+# the game's decrypted ipa, for make ipa
+IPA ?= ../apks/Phigros-ios-4.0.4/Phigros.ipa
 # Phigros++ installs as its own app, next to the game
 export PACKAGE := sh.molly.phigrosplusplus
 LIB := build/libphigrospp.so
 DEX := build/picker.dex
 SPLIT := out/split_config.arm64_v8a.apk
-DYLIB := build/libphigrospp.dylib
+IOS := build/phigrospp.ios
 SOURCES := $(wildcard phigrospp/* phigrospp/lua/* mods/* mods/*/* vendor/lua/* vendor/tweetnacl/* vendor/opus/*/*) \
 	scripts/build-lib.sh scripts/bundle.sh
 
 # every target talks to the same device or files, one at a time
 .NOTPARALLEL:
 
-.PHONY: all lib apk ipa ios-logs verify install install-full push push-core reset start stop restart logs profile dev release publish clean
+.PHONY: all lib apk ios ipa ios-logs verify install install-full push push-core reset start stop restart logs profile dev release publish clean
 
 all: apk
 
@@ -35,15 +35,17 @@ apk: $(SPLIT)
 $(SPLIT): $(LIB) scripts/build-apk.sh scripts/patch_libmain.py scripts/patch_apk.py $(wildcard $(APKS)/*.apk)
 	scripts/build-apk.sh $(APKS)
 
+# what patches the game's ipa, on phigros.tools too: the library for each ios game of phigrospp/GAMES and the names
+# the sources may hook. no game file goes in, so CI builds the same (.github/workflows/ios.yml)
+ios: $(IOS)
+HOOKED := $(wildcard phigrospp/*.c phigrospp/lua/*.lua mods/*.lua mods/*/*.lua)
+$(IOS): $(SOURCES) $(DEX) scripts/build-ios.ts
+	node scripts/build-ios.ts $@ $(HOOKED)
+
 # the game's ipa with phigros++ in it, for AltStore or SideStore to sign and install (see the wiki's Development page)
 ipa: build/Phigros++.ipa
-HOOKED := $(wildcard phigrospp/*.c phigrospp/lua/*.lua mods/*.lua mods/*/*.lua)
-build/Phigros++.ipa: $(DYLIB) scripts/patch_ipa.py scripts/patch_apk.py $(IPA)/Phigros.ipa $(IPA)/dump/script.json $(HOOKED)
-	python3 -I scripts/patch_ipa.py $(IPA)/Phigros.ipa $@ $(DYLIB) $(IPA)/dump/script.json $(HOOKED)
-$(IPA)/dump/script.json: $(IPA)/Phigros.ipa scripts/dump.sh
-	scripts/dump.sh $(IPA)
-$(DYLIB): $(SOURCES) $(IPA)/Phigros.ipa $(DEX)
-	scripts/build-lib.sh $(IPA)
+build/Phigros++.ipa: $(IOS) scripts/ipa.ts scripts/patch_ipa.ts scripts/icon.py scripts/patch_apk.py $(IPA)
+	node scripts/patch_ipa.ts $(IPA) $@ $(IOS)
 
 ios-logs:
 	idevicesyslog -m libphigrospp

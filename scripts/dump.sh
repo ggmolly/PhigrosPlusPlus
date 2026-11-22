@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # usage: dump.sh <game folder>, writes <game folder>/dump/ (dump.cs, script.json, stringliteral.json, libil2cpp.so)
-# from its apks or its decrypted Phigros.ipa, with the il2cppdumper of shell.nix (make ipa runs this)
+# from its apks or its decrypted Phigros.ipa, with the il2cppdumper of shell.nix
 set -euo pipefail
 GAMEDIR=$(realpath "${1:?usage: dump.sh <game folder>}")
 OUT=$GAMEDIR/dump

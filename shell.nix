@@ -13,7 +13,7 @@ let
     stripRoot = false; # cmake wants a path with /iPhoneOS in it
     hash = "sha256-g7WXMcwMeJMzRZPm3QVL5iIRPQjJEv8mT1/laFPqk8Y=";
   };
-  # whose script.json says where each of the game's methods is, for patch_ipa.py (scripts/dump.sh)
+  # dumps the game's classes and where its methods are, to read its code and for make profile (scripts/dump.sh)
   il2cppdumper = pkgs.fetchzip {
     url = "https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.46/Il2CppDumper-net7-v6.7.46.zip";
     stripRoot = false;

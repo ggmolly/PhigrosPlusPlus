@@ -177,10 +177,10 @@ def data_offset(file, info):
 
 
 # an uncompressed entry's data starts on its alignment, as android requires for resources.arsc, padded with the extra
-# field zipalign uses (0xd935). an ipa has no alignment
-def put(out, central, info, source, align=True):
+# field zipalign uses (0xd935)
+def put(out, central, info, source):
     name, offset, extra = info.filename.encode(), out.tell(), b""
-    if align and info.compress_type == zipfile.ZIP_STORED:
+    if info.compress_type == zipfile.ZIP_STORED:
         align = 16384 if info.filename.endswith(".so") else 4
         pad = -(offset + 30 + len(name)) % align
         while pad and pad < 6:
@@ -203,13 +203,11 @@ def put(out, central, info, source, align=True):
                    struct.pack("<HHHHHII", len(name), 0, 0, 0, 0, info.external_attr, offset) + name)
 
 
-# mode is the unix permissions kept with the entry (patch_ipa.py), none for an apk
-def added(out, central, name, data, method=zipfile.ZIP_DEFLATED, mode=0):
+def added(out, central, name, data, method=zipfile.ZIP_DEFLATED):
     deflate = zlib.compressobj(9, zlib.DEFLATED, -15)
     compressed = deflate.compress(data) + deflate.flush() if method == zipfile.ZIP_DEFLATED else data
     info = zipfile.ZipInfo(name, (2020, 1, 1, 0, 0, 0))
-    info.compress_type, info.create_system, info.CRC = method, 3 if mode else 0, zlib.crc32(data)
-    info.external_attr = mode << 16
+    info.compress_type, info.create_system, info.CRC = method, 0, zlib.crc32(data)
     info.compress_size, info.file_size = len(compressed), len(data)
     put(out, central, info, compressed)
 

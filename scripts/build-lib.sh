@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# usage: build-lib.sh <game folder>, builds the library (lua, the il2cpp bridge, dobby and the bundle) for the game in
-# that folder with the tools of shell.nix (make runs this): build/libphigrospp.so with the android ndk for a folder of
-# apks, build/libphigrospp.dylib with clang and the ios sdk for one holding Phigros.ipa
+# usage: build-lib.sh <apks folder | ios:<version>>, builds the library (lua, the il2cpp bridge, dobby and the bundle)
+# with the tools of shell.nix (make runs this): build/libphigrospp.so with the android ndk for the game of a folder of
+# apks, build/libphigrospp.dylib with clang and the ios sdk for a version of the ios game, without any of its files
 set -euo pipefail
-GAMEDIR=$(realpath "${1:?usage: build-lib.sh <game folder>}")
+GAME=${1:?usage: build-lib.sh <apks folder | ios:<version>>}
 MOD=$(dirname "$(dirname "$(realpath "$0")")")
 SRC=$MOD/phigrospp
 LUA=$MOD/vendor/lua # github.com/lua/lua at v5.4.7
@@ -14,7 +14,7 @@ TINF=$MOD/vendor/tinf # github.com/jibsen/tinf at v1.2.1, inflates the block are
 OUT=$MOD/build
 mkdir -p "$OUT"
 
-if [ -f "$GAMEDIR/Phigros.ipa" ]; then
+if [[ $GAME == ios:* ]]; then
   SDK=${IOS_SDK:?run it in the nix shell of shell.nix}
   TARGET=arm64-apple-ios15.0
   PLATFORM=ios LIB=libphigrospp.dylib
@@ -28,8 +28,7 @@ if [ -f "$GAMEDIR/Phigros.ipa" ]; then
   # nothing is exported: dyld runs the constructor, the rest is found through it
   LINK=(-fuse-ld=lld -install_name @executable_path/Frameworks/$LIB -framework AudioToolbox -framework CoreFoundation
     -lobjc -lc++ -Wl,-dead_strip -Wl,-exported_symbols_list,/dev/null)
-  GAME=$(unzip -p "$GAMEDIR/Phigros.ipa" 'Payload/*.app/Info.plist' |
-    python3 -I -c 'import plistlib, sys; print(plistlib.loads(sys.stdin.buffer.read())["CFBundleShortVersionString"])')
+  GAME=${GAME#ios:}
 else
   NDK=${ANDROID_NDK:?run it in the nix shell of shell.nix}
   PLATFORM=android LIB=libphigrospp.so
@@ -38,7 +37,7 @@ else
     -DANDROID_PLATFORM=android-24 -DPlugin.SymbolResolver=OFF)
   LINK=(-l:libc++_static.a -l:libc++abi.a -llog -lmediandk -ldl -Wl,--gc-sections -Wl,--exclude-libs,ALL
     -Wl,-z,max-page-size=16384 -Wl,--build-id=none)
-  GAME=$(aapt2 dump badging "$GAMEDIR/base.apk" | sed -n "s/^package:.* versionName='\([^']*\)'.*/\1/p")
+  GAME=$(aapt2 dump badging "$GAME/base.apk" | sed -n "s/^package:.* versionName='\([^']*\)'.*/\1/p")
 fi
 
 if [ ! -f "$OUT/dobby-$PLATFORM/libdobby.a" ]; then
