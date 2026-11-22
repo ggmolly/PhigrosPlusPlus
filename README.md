@@ -39,6 +39,9 @@ downloaded. It fetches the latest Phigros++ release from this repository, checke
 it later the same way, keeping everything. Phigros++ starts with its own save: turn on sync in Settings → Profile to
 keep it on phigros.tools, or restore your profile there to bring back the save you uploaded.
 
+On an iPhone or iPad, [phigros.tools](https://phigros.tools/phigrospp?device=ios) patches your decrypted copy of the
+game into Phigros++ in your browser, without uploading it, for SideStore or AltStore to install.
+
 Your own mods go in `Android/data/sh.molly.phigrosplusplus/files/phigros++/mods/`. A mod runs with everything Phigros++
 has, the key of your phigros.tools profile included, so only install mods you trust.
 
