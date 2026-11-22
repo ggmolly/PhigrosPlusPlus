@@ -214,7 +214,8 @@ on("update", function()
   if dark then dark.color = BLACK end
   if not broken or replaying() then return end
   broken = false
-  if has("PF") then return phigrospp.restart() end
+  -- a song that can't start again (a room's) is left, as with Sudden Death
+  if has("PF") and phigrospp.pausing() then return phigrospp.restart() end
   phigrospp.leave()
 end)
 
@@ -242,12 +243,8 @@ local function effects()
   return selector.SongItems._items[selector.nowSong].songInfo.levelMods._items[selector.nowLevel].levelMods._size > 0
 end
 
-local function open()
-  if ui.paging() or selector.locked.activeSelf then return end
-  if effects() then
-    return ui.confirm({ title = "Modifiers", yes = "OK", no = false,
-      message = "This song has effects of its own, so it plays without modifiers." })
-  end
+-- the tiles to pick them from, until Done
+local function choose()
   local cells = {}
   for i, id in ipairs(GRID) do
     local m = BY[id]
@@ -259,8 +256,16 @@ local function open()
   cells[#cells + 1] = { icon = ui.icon("x"), label = "Reset", colour = { 1, 1, 1, 1 },
     on = function() return false end, note = function() return "" end,
     tap = function() M.pick(0) end }
-  selector.enabled = false -- the song list reads the touches itself
   ui.confirm({ title = "Modifiers", yes = "Done", no = false, grid = { cells = cells, columns = 5, height = 190 } })
+end
+
+local PLAIN = "This song has effects of its own, so it plays without modifiers."
+
+local function open()
+  if ui.paging() or selector.locked.activeSelf then return end
+  if effects() then return ui.confirm({ title = "Modifiers", yes = "OK", no = false, message = PLAIN }) end
+  selector.enabled = false -- the song list reads the touches itself
+  choose()
   if il2cpp.alive(selector) then selector.enabled = true end
 end
 
@@ -284,3 +289,6 @@ on("update", function()
   local at, size, pivot = play.anchoredPosition, play.sizeDelta, play.pivot
   strip.anchoredPosition = { at.x + size.x * (1 - pivot.x) - 32, at.y + size.y * (1 - pivot.y) + 16 }
 end)
+
+-- for the mods that pick modifiers elsewhere (rooms)
+return { choose = choose, PLAIN = PLAIN }
