@@ -1,0 +1,23 @@
+# builds what patches the ios game (build/phigrospp.ios) from the sources alone with the tools of shell.nix, so anyone
+# can check a release's: it's this file behind the 64 bytes of the release key's signature, which is never here
+name: ios
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: cachix/install-nix-action@v31
+      - run: nix-shell --run 'make ios'
+      - run: sha256sum build/phigrospp.ios
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phigrospp.ios
+          path: build/phigrospp.ios
