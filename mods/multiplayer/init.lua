@@ -28,7 +28,8 @@ local ERRORS = {
 local scores = setting("Show the room's scores while playing", true)
 
 -- me: the player phigros.tools knows this device as, room: the room as the server last sent it, chat: what was said
--- since joining ({ name =, text = }), picking: its host is away from its screen to pick a chart
+-- since joining ({ name =, text = }), picking: its host is away from its screen to pick a chart, waiting: the player
+-- followed while none of their play came yet
 local mp = { chat = {} }
 local screen
 local socket, online, unsent, tries = nil, false, {}, 0 -- online: the server knows who this is
@@ -113,6 +114,7 @@ end
 -- a spectator watches a player's play from where it is, until it ends or they leave it (nil)
 local function follow(p)
   spectating = p and { id = p.player.id, parts = 0 }
+  mp.waiting = p and p.player
   send({ t = "follow", player = p and p.player.id or "", from = 0 })
   phigrospp.replay.follow(p and ("%s#%04d"):format(p.player.name, p.player.number))
   screen.refresh()
@@ -135,9 +137,16 @@ function heard.room(m)
     checked = key
     if chart and not phigrospp.unlocked(chart.id, chart.level) then send({ t = "able", able = false }) end
   end
-  -- the play followed ended once its player doesn't play any more, their last frames came before
+  -- a game that plays for the room without a match was restarted during it (the server kept its place): it gave up
+  local mine = seat(room, mp.me.id)
+  if mine.playing and not match then send({ t = "quit" }) end
+  -- the play followed ended once its player doesn't play any more, their last frames came before. one that ended
+  -- before any came never shows, the room does again
   local followed = spectating and seat(room, spectating.id)
-  if spectating and not (followed and followed.playing) then phigrospp.replay.feed() end
+  if spectating and not (followed and followed.playing) then
+    if spectating.parts == 0 then return follow(nil) end
+    phigrospp.replay.feed()
+  end
   screen.refresh()
 end
 
@@ -145,6 +154,10 @@ function heard.frames(m)
   if not spectating or m.player ~= spectating.id then return end
   spectating.parts = spectating.parts + 1
   phigrospp.replay.feed(phigrospp.unbase64(m.data))
+  if mp.waiting then
+    mp.waiting = nil
+    screen.refresh()
+  end
 end
 
 function heard.start(m)
@@ -315,7 +328,7 @@ end)
 
 -- shown: whether the room's screen has its place, in a menu while no match is played
 screen = require("screen")(mp, { send = send, enter = enter, join = join, follow = follow, seat = seat,
-  shown = function() return MENUS[scene()] and not match and not spectating end })
+  shown = function() return MENUS[scene()] and not match and (not spectating or mp.waiting) end })
 
 on("scene", function(name)
   if name == "ChapterSelector" then ui.shortcut("users", screen.open) end

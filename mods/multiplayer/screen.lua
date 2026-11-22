@@ -344,11 +344,19 @@ return function(mp, room)
     end)
   end
 
+  -- a spectator who picked a player until their play comes, like the replay player's "Preparing..."
+  local function drawWaiting(player)
+    part("top", player.id, function(root)
+      back(root, function() room.follow(nil) end)
+      text(root, { width / 2, H / 2 }, 56, ("Waiting for %s's play..."):format(player.name), WHITE, 4, { 0.5, 0.5 })
+    end)
+  end
+
   -- what shows follows the room, the scene and what the player is doing: the mod calls it at each change
   function S.refresh()
     local r, shown = mp.room, room.shown()
     if r and listing then closeList() end
-    local view = shown and (r and not mp.picking and "room" or listing and "list") or nil
+    local view = shown and (r and not mp.picking and (mp.waiting and "waiting" or "room") or listing and "list") or nil
     -- the song list reads the touches itself: it's turned off under the screen once it filled in and the game's
     -- loading screen, which waits for it, is gone, unless a page or a dialog did already
     local selector = scene() == "SongSelector" and not kit.paging() and not il2cpp.alive(kit.dialog)
@@ -373,7 +381,7 @@ return function(mp, room)
       return
     end
     show(view)
-    if view == "list" then drawList() else drawRoom(r) end
+    if view == "list" then drawList() elseif view == "waiting" then drawWaiting(mp.waiting) else drawRoom(r) end
   end
 
   -- the chapter screen's tab: the room when in one, else the open rooms
