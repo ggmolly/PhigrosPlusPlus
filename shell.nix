@@ -13,6 +13,13 @@ let
     stripRoot = false; # cmake wants a path with /iPhoneOS in it
     hash = "sha256-g7WXMcwMeJMzRZPm3QVL5iIRPQjJEv8mT1/laFPqk8Y=";
   };
+  # whose script.json says where each of the game's methods is, for patch_ipa.py (scripts/dump.sh)
+  il2cppdumper = pkgs.fetchzip {
+    url = "https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.46/Il2CppDumper-net7-v6.7.46.zip";
+    stripRoot = false;
+    postFetch = "sed -i 's/\"RequireAnyKey\": true/\"RequireAnyKey\": false/' $out/config.json";
+    hash = "sha256-IQXw04+iByNyBE7nFoEEHmPw5aoLhH8096JWmqVpw/w=";
+  };
 in
 pkgs.mkShell {
   packages = with pkgs; [
@@ -33,9 +40,11 @@ pkgs.mkShell {
     llvmPackages.lld
     llvmPackages.llvm # llvm-install-name-tool for cmake, llvm-strip and llvm-otool
     libimobiledevice # idevicesyslog, make ios-logs
+    dotnetCorePackages.runtime_8_0 # runs il2cppdumper
   ];
   ANDROID_NDK = "${android.ndk-bundle}/libexec/android-sdk/ndk-bundle";
   IOS_SDK = "${iosSdk}/iPhoneOS16.5.sdk";
+  IL2CPPDUMPER = "${il2cppdumper}/Il2CppDumper.dll";
   # d8 and android.jar, which scripts/bundle.sh builds picker.dex with
   ANDROID_BUILD_TOOLS = "${builtins.head android.build-tools}/libexec/android-sdk/build-tools";
   ANDROID_PLATFORMS = "${builtins.head android.platforms}/libexec/android-sdk/platforms";

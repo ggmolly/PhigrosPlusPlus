@@ -40,6 +40,8 @@ ipa: build/Phigros++.ipa
 HOOKED := $(wildcard phigrospp/*.c phigrospp/lua/*.lua mods/*.lua mods/*/*.lua)
 build/Phigros++.ipa: $(DYLIB) scripts/patch_ipa.py scripts/patch_apk.py $(IPA)/Phigros.ipa $(IPA)/dump/script.json $(HOOKED)
 	python3 -I scripts/patch_ipa.py $(IPA)/Phigros.ipa $@ $(DYLIB) $(IPA)/dump/script.json $(HOOKED)
+$(IPA)/dump/script.json: $(IPA)/Phigros.ipa scripts/dump.sh
+	scripts/dump.sh $(IPA)
 $(DYLIB): $(SOURCES) $(IPA)/Phigros.ipa $(DEX)
 	scripts/build-lib.sh $(IPA)
 
