@@ -6,7 +6,7 @@
 -- frame: { t = song time, dt = delta time, touches = { { id =, phase =, x =, y = } }, and what the game's other clocks
 -- said: udt = unscaled delta time, scale = time scale, real = realtime since startup, music = the music's time (all
 -- f32), mono = the system's monotonic clock and dsp = the audio clock (integer µs), focus = whether the game had focus }
--- positions are on the 1/1024 pixel grid Unity reports them on
+-- positions are on the 1/1024 pixel grid (replay.lua snaps them to it)
 -- event: { kind = "pause" or "resume", frame = frames recorded before it, mono = when }, nothing is recorded in a pause
 
 local MAGIC, VERSION = "PIGEON", 6

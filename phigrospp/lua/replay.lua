@@ -29,11 +29,14 @@ local function folder(id, difficulty) return ("%s/%s.%s"):format(DIR, id, diffic
 -- the result fields a replay keeps and compares when it's watched (accuracy is kept too, as an f32 for showing)
 local RESULT = { "score", "maxcombo", "perfect", "good", "bad", "miss", "early", "late" }
 
+-- android's unity reports positions on the 1/1024 pixel grid replays code, ios scales them to any float
+local function snap(v) return math.floor(v * 1024 + 0.5) / 1024 end
+
 local function readTouches()
   local list, all = {}, Input.touches
   for i = 0, #all - 1 do
     local t = all[i]
-    list[i + 1] = { id = t.m_FingerId, phase = t.m_Phase, x = t.m_Position.x, y = t.m_Position.y }
+    list[i + 1] = { id = t.m_FingerId, phase = t.m_Phase, x = snap(t.m_Position.x), y = snap(t.m_Position.y) }
   end
   return list
 end
