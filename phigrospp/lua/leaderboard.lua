@@ -9,6 +9,7 @@ local WHITE, BLACK, DIM = { 1, 1, 1, 1 }, { 0, 0, 0, 1 }, { 1, 1, 1, 0.5 }
 
 local canvas, font, screen
 local verified = false
+local shortcuts -- the last tab kit.shortcut made on this chapter screen, and how many there are
 
 -- a copy of a tab of the chapter screen showing a Lucide icon
 local function tab(original, offset, icon, fn)
@@ -17,6 +18,30 @@ local function tab(original, offset, icon, fn)
   image.sizeDelta = { 44, 44 } -- like the game's icons
   image:GetComponent(UE.UI.Image).sprite = kit.icon(icon)
   return copy
+end
+
+-- a tab left of the chapter screen's settings one and of those made before it, showing an icon and running fn. each
+-- goes under the one on its right, which hides its square end behind its stripe: the icon moves left by what that
+-- covers, to the middle of what shows
+function kit.shortcut(icon, fn)
+  local settings = UE.GameObject.Find("Canvas/Settings").transform
+  shortcuts = shortcuts or { last = settings, count = 0 }
+  shortcuts.count = shortcuts.count + 1
+  local made = tab(settings, { -settings.sizeDelta.x * shortcuts.count, 0 }, icon, fn).transform
+  made:SetSiblingIndex(shortcuts.last:GetSiblingIndex())
+  local image = find(made, "Image")
+  image.anchoredPosition = { image.anchoredPosition.x - 12, image.anchoredPosition.y }
+  shortcuts.last = made
+end
+
+-- a player's avatar (the game's key of it, as phigros.tools gives it) in a square placed like kit.rect does. one
+-- this version of the game doesn't have yet shows as the default one
+function kit.avatar(parent, name, pos, size, key)
+  local image = kit.rect(parent, name, pos, { size, size }, WHITE)
+  local avatars = UE.Object.FindObjectOfType(CS.GetCollectionControl).Avatars
+  key = avatars:ContainsKey(key) and key or "Introduction"
+  image.gameObject:AddComponent(CS.AddressableImageLoader).Code = avatars:get_Item(key).addressableKey
+  return image
 end
 
 local function row(s, entry)
@@ -33,11 +58,7 @@ local function row(s, entry)
     return t
   end
   text(100, 40, 5, { 1, 0.5 }, tostring(entry.rank), ink) -- MiddleRight
-  local avatar = kit.rect(shape.transform, "phigrospp-leaderboard-avatar", { 124, ROW / 2 }, { 64, 64 }, WHITE)
-  -- an avatar this version of the game doesn't have yet shows as the default one
-  local avatars = UE.Object.FindObjectOfType(CS.GetCollectionControl).Avatars
-  local key = avatars:ContainsKey(player.avatar) and player.avatar or "Introduction"
-  avatar.gameObject:AddComponent(CS.AddressableImageLoader).Code = avatars:get_Item(key).addressableKey
+  kit.avatar(shape.transform, "phigrospp-leaderboard-avatar", { 124, ROW / 2 }, 64, player.avatar)
   local name = text(212, 40, 3, { 0, 0.5 }, player.name, ink) -- MiddleLeft
   text(220 + name.preferredWidth, 32, 3, { 0, 0.5 }, ("#%04d"):format(player.number), mine and { 0, 0, 0, 0.5 } or DIM)
   text(s.list.width - 48, 40, 5, { 1, 0.5 }, ("%.2f"):format(entry.rks), ink)
@@ -109,16 +130,11 @@ local function open()
 end
 
 on("scene", function(name)
-  screen = nil
+  screen, shortcuts = nil, nil
   if name ~= "ChapterSelector" then return end
-  local settings = UE.GameObject.Find("Canvas/Settings").transform
-  canvas, font = settings.parent, UE.Object.FindObjectOfType(CS.ChapterSelector).nowLevel.font
-  -- under the settings tab, which hides its square right end behind its stripe. the icon moves left by what the stripe
-  -- covers, to the middle of what shows
-  local trophy = tab(settings, { -settings.sizeDelta.x, 0 }, "trophy", open).transform
-  trophy:SetSiblingIndex(settings:GetSiblingIndex())
-  local icon = find(trophy, "Image")
-  icon.anchoredPosition = { icon.anchoredPosition.x - 12, icon.anchoredPosition.y }
+  canvas = UE.GameObject.Find("Canvas/Settings").transform.parent
+  font = UE.Object.FindObjectOfType(CS.ChapterSelector).nowLevel.font
+  kit.shortcut("trophy", open)
 end)
 
 on("update", function()

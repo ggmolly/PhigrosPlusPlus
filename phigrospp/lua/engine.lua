@@ -191,14 +191,22 @@ function phigrospp.private()
   return JNI.GetStringUTFChars(call(dir, "getAbsolutePath", "()Ljava/lang/String;"))
 end
 
--- the link the app was opened with (phigrospp://...), given once
-function phigrospp.link()
+-- the link the app was opened with or brought back by (phigrospp://...), given once
+local function opened()
   local intent = call(activity(), "getIntent", "()Landroid/content/Intent;")
   local link = call(intent, "getDataString", "()Ljava/lang/String;")
   if link == 0 then return nil end -- a null object
   call(intent, "setData", "(Landroid/net/Uri;)Landroid/content/Intent;", { { l = 0 } })
   return JNI.GetStringUTFChars(link)
 end
+
+-- on("link") hears of it. the app doesn't always see itself lose the focus, so it's looked for twice a second
+every(0.5, function()
+  JNI.PushLocalFrame(8)
+  local link = opened()
+  JNI.PopLocalFrame(0)
+  if link then phigrospp.emit("link", link) end
+end)
 
 -- android's file picker, showing the files of the mime types given: the picked file's bytes and name, nothing when
 -- the player backs out, nil and why when it can't be read. it waits for the player, so it's called from a coroutine
@@ -370,6 +378,15 @@ phigrospp.ui = {
     canvas.renderMode, canvas.sortingOrder = 0, order -- ScreenSpaceOverlay
     return go
   end,
+  -- a canvas over everything in any scene, 1080 units high like the game's menus, whose buttons take taps: its
+  -- transform and its width. it gets its size on its first frame, so pieces go from its bottom left corner
+  screen = function(name, order)
+    local go = phigrospp.ui.overlay(name, order)
+    local scaler = go:AddComponent(UE.UI.CanvasScaler)
+    scaler.uiScaleMode, scaler.referenceResolution, scaler.matchWidthOrHeight = 1, { 1920, 1080 }, 1 -- ScaleWithScreenSize
+    go:AddComponent(UE.UI.GraphicRaycaster)
+    return go.transform, 1080 * UE.Screen.width / UE.Screen.height
+  end,
   -- a component on a new object under parent, from its bottom left corner
   place = function(parent, name, kind, pos, size, pivot)
     local component = UE.GameObject(name):AddComponent(kind)
@@ -422,8 +439,8 @@ phigrospp.ui = {
     root:SetParent(canvas, false)
     root.anchorMin, root.anchorMax, root.sizeDelta = { 0, 0 }, { 1, 1 }, { 0, 0 }
     local p = { transform = root, group = root.gameObject:AddComponent(UE.CanvasGroup), start = now(), closed = closed }
-    phigrospp.ui.rect(root, name .. "-shade", { 0, 0 }, { canvas.rect.m_Width, canvas.rect.m_Height },
-      { 0, 0, 0, shade or 0.85 }, { 0, 0 }).raycastTarget = true
+    local dark = phigrospp.ui.rect(root, name .. "-shade", { 0, 0 }, { 0, 0 }, { 0, 0, 0, shade or 0.85 }, { 0, 0 })
+    dark.transform.anchorMax, dark.raycastTarget = { 1, 1 }, true
     function p.close()
       if not p.closing then p.closing, p.start = true, now() end
     end

@@ -80,7 +80,15 @@ phigrospp.modifiers = {
   end,
   -- the modifiers of the song loading, played or on its result screen, and its seed: a watched replay's are its own
   play = function() return mods, seed end,
-  -- what the song list's Play starts: the replay it watches if any, else the picks, with a seed that shuffles
+  -- whether a chart of the game plays with modifiers: one with effects of its own doesn't (see the hook below)
+  fits = function(id, difficulty)
+    local info = CS.GameInformation.main:GetSongInformation(id)
+    for i = 0, #info.levels - 1 do
+      if info.levels[i] == difficulty then return info.levelMods._items[i].levelMods._size == 0 end
+    end
+  end,
+  -- what the song list's Play starts: the replay it watches if any (or what a play is given: { mods =, seed = }), else
+  -- the picks, with a seed that shuffles
   start = function(header)
     mods, seed = header and header.mods or picks, header and header.seed or 0
     if header or mods & 2097152 == 0 then return end

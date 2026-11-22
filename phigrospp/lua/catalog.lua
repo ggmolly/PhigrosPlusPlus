@@ -511,14 +511,10 @@ tab("Mods", nil, function(view, font)
   load(redraw)
 end)
 
--- a link opens the app or brings it back to the front. what it names is asked about on the chapter screen, where the
--- game's popup is loaded
-local focused
+-- the mod a link names is asked about on the chapter screen, where the game's popup is loaded
+on("link", function(url) link = mods.repo(url) or link end)
 
 on("update", function()
-  local focus = UE.Application.isFocused
-  if focus and not focused then link = mods.repo(phigrospp.link() or "") or link end
-  focused = focus
   if link and scene() == "ChapterSelector" and not il2cpp.alive(kit.dialog) then
     local repo = link
     link = nil

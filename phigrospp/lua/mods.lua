@@ -285,15 +285,16 @@ function phigrospp.dir()
 end
 
 -- require("util") is first util.lua (or util/init.lua) of the calling mod's own folder, run once: a mod is written
--- the same in mods/ and once installed, and two mods can each have their util
+-- the same in mods/, in the bundle and once installed, and two mods can each have their util
 local anywhere, own = require, {}
 
 function require(name)
   local dir = folder(2)
   local path = dir and dir .. name:gsub("%.", "/")
   for _, file in ipairs(dir and { path .. ".lua", path .. "/init.lua" } or {}) do
-    if own[file] == nil and IO.File.Exists(file) then
-      local result = assert(loadfile(file, "t"))(name, file)
+    local bundled = file:match("^bundle/(.*)")
+    if own[file] == nil and (bundled and phigrospp.bundle[bundled] or IO.File.Exists(file)) then
+      local result = assert(load(phigrospp.read(file), "@" .. file, "t"))(name, file)
       own[file] = result == nil or result
     end
     if own[file] ~= nil then return own[file] end

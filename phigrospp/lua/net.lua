@@ -1,5 +1,5 @@
 -- requests to phigros.tools through the game's UnityWebRequest, checked each frame. this unity has no SetRequestHeader,
--- so a signed request puts the player's public key, the signature and the time before its body
+-- so a signed request puts the player's public key, the signature and the time before its body. and WebSockets
 
 local Networking = CS.UnityEngine.Networking
 local HOST = "https://phigros.tools"
@@ -110,6 +110,86 @@ on("update", function()
   end
 end)
 
+-- sockets: a WebSocket of .NET's, which works on tasks. each is checked every frame, with one send and one receive
+-- going at a time
+local WebSockets = CS.System.Net.WebSockets
+local CHUNK = 8192 -- bytes read at once, a longer message comes in parts
+local NEVER = {} -- a CancellationToken that never cancels
+local sockets = {}
+
+-- a text WebSocket to a url: handlers.open(), handlers.message(text) and handlers.close() (it ended, or couldn't be
+-- made) run on the main thread. returns { send = function(text), close = function() }, a closed one tells nothing
+function phigrospp.socket(url, handlers)
+  local s = { ws = WebSockets.ClientWebSocket(), handlers = handlers, queue = {}, parts = {},
+    buffer = il2cpp.bytes(("\0"):rep(CHUNK)) }
+  s.connecting = s.ws:ConnectAsync(CS.System.Uri(url), NEVER)
+  sockets[#sockets + 1] = s
+  return {
+    send = function(text) s.queue[#s.queue + 1] = text end,
+    close = function()
+      s.closed = true
+      s.ws:Abort()
+    end,
+  }
+end
+
+-- nil while a task runs, then whether it went well
+local function done(task)
+  if task.IsCompleted then return not task.IsFaulted and not task.IsCanceled end
+end
+
+local function tell(s, event, ...)
+  local ok, err = xpcall(s.handlers[event], debug.traceback, ...)
+  if not ok then print(("socket %s failed: %s"):format(event, err)) end
+end
+
+local function drop(s)
+  s.closed = true
+  s.ws:Abort()
+  tell(s, "close")
+end
+
+local function receive(s) return s.ws:ReceiveAsync({ s.buffer, 0, CHUNK }, NEVER) end
+
+local function poll(s)
+  if s.connecting then
+    local ok = done(s.connecting)
+    if ok == nil then return end
+    if not ok then return drop(s) end
+    s.connecting, s.receiving = nil, receive(s)
+    tell(s, "open")
+    if s.closed then return end
+  end
+  if s.sending and done(s.sending) ~= nil then s.sending = nil end -- a failed one fails the receive too
+  -- a socket the server closed refuses to send, its receive says so next
+  if not s.sending and s.queue[1] and s.ws.State == 2 then -- Open
+    local bytes = il2cpp.bytes(table.remove(s.queue, 1))
+    s.sending = s.ws:SendAsync({ bytes, 0, #bytes }, 0, true, NEVER) -- Text, the whole message
+  end
+  local ok = done(s.receiving)
+  while ok do
+    local result = s.receiving.m_result
+    if result.MessageType == 2 then return drop(s) end -- Close
+    s.parts[#s.parts + 1] = il2cpp.unbytes(s.buffer):sub(1, result.Count)
+    if result.EndOfMessage then
+      local text = table.concat(s.parts)
+      s.parts = {}
+      tell(s, "message", text)
+      if s.closed then return end -- by what heard it
+    end
+    s.receiving = receive(s)
+    ok = done(s.receiving)
+  end
+  if ok == false then drop(s) end
+end
+
+on("update", function()
+  for i = #sockets, 1, -1 do
+    if sockets[i].closed then table.remove(sockets, i) else poll(sockets[i]) end
+  end
+end)
+
 on("unload", function()
   for _, p in ipairs(pending) do p.request:Dispose() end
+  for _, s in ipairs(sockets) do s.ws:Abort() end
 end)

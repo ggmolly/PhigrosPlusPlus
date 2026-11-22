@@ -5,6 +5,7 @@ local LANGUAGES = { [40] = "chinese", [41] = "chineseTraditional", [10] = "engli
 
 local chart, scorer, paused, stage
 local speed, clock, ticking = 1 -- phigrospp.speed: how fast the song runs, its clock and the hook giving it to the game
+local nonstop -- phigrospp.pausing(false): the hooks keeping the song from being paused or started again
 -- what ScoreControl counts of a play, and those counts as the song started
 local SCORE = { "_score", "_percent", "_combo", "maxcombo", "perfect", "good", "bad", "miss", "early", "late",
   "isAllPerfect", "isFullCombo" }
@@ -49,6 +50,73 @@ function song(id)
   songs()
   return byId[id]
 end
+
+-- whether the player can play a chart: the game has it, and its song and difficulty are unlocked
+function phigrospp.unlocked(id, difficulty)
+  if not song(id) or not song(id).charts[difficulty] then return false end
+  local GI = CS.GameInformation.main
+  local levels = GI:GetSongInformation(id).levels
+  local _, kind, charts = GI:CheckSongUnlock(id, 0, nil, false, nil) -- what the song list asks: -1 is unlocked
+  for i = 0, #levels - 1 do
+    if levels[i] == difficulty then return kind == -1 and charts[i] end
+  end
+end
+
+-- the chart phigrospp.play starts once the song list of its chapter is there: { id, difficulty, mods, seed, loading }
+local starting
+
+-- the code of a chapter holding a song, the one whose song list was last open when it does
+local function chapterOf(id)
+  local GI = CS.GameInformation
+  local found
+  for i = 0, #GI.main.chapters - 1 do
+    local chapter = GI.main.chapters[i]
+    local items = chapter.songInfo.songs
+    for j = 0, items._size - 1 do
+      if items._items[j].songsId == id and (not found or chapter.chapterCode == GI.nowChapterCode) then
+        found = chapter.chapterCode
+      end
+    end
+  end
+  return found
+end
+
+-- starts a chart of the game from any screen, as its song list's Play does: the song list of its chapter loads when
+-- it isn't the open one. it plays with the modifiers and seed given (phigrospp.modifiers), not the player's picks
+function phigrospp.play(id, difficulty, mods, seed)
+  local chapter = chapterOf(id)
+  starting = { id = id, difficulty = difficulty, mods = mods or 0, seed = seed or 0 }
+  if scene() == "SongSelector" and CS.GameInformation.nowChapterCode == chapter then return end
+  starting.loading = true
+  CS.GameInformation.nowChapterCode = chapter
+  CS.UnityEngine.SceneManagement.SceneManager.LoadScene("SongSelector")
+end
+
+on("scene", function(name)
+  if starting and name == "SongSelector" then starting.loading = false else starting = nil end
+end)
+
+-- the song list fills in after its scene starts
+on("update", function()
+  if not starting or starting.loading then return end
+  local selector = CS.UnityEngine.Object.FindObjectOfType(CS.SongSelector)
+  selector.enabled = true -- a page over the song list turns it off, and it only fills in while it's on
+  local items = selector.SongItems
+  if items._size == 0 then return end
+  local wanted = starting
+  starting = nil
+  for i = 0, items._size - 1 do
+    local info = items._items[i].songInfo
+    for level = 0, #info.levels - 1 do
+      if info.songsId == wanted.id and info.levels[level] == wanted.difficulty then
+        selector.nowSong, selector.nowLevel = i, level
+        phigrospp.modifiers.start(wanted)
+        return selector:GameStart(i, level)
+      end
+    end
+  end
+  error(("the song list has no %s %s"):format(wanted.id, wanted.difficulty))
+end)
 
 -- a value of the game's save as SaveManagement.LoadString reads it, without the rewrite LoadString makes of a value
 -- saved the old way (DES). nil when the save has none
@@ -114,6 +182,8 @@ hook(CS.LevelControl, "OnDestroy", {
     if not chart then return end
     chart, scorer, speed = nil, nil, 1
     if ticking then ticking = unhook(ticking) end
+    for _, id in ipairs(nonstop or {}) do unhook(id) end
+    nonstop = nil
     emit("leave")
   end,
 })
@@ -232,6 +302,7 @@ end
 -- puts the song being played back at its start in place, every note unjudged and nothing scored. the game then
 -- waits before the music like a fresh start does, a replay plays its own recorded start instead
 function phigrospp.restart()
+  if nonstop then return end
   local progress = stage.progressControl
   if not replaying() and progress.isPlaying then progress:Play(false) end -- the music stops as the pause button does
   phigrospp.jump(0)
@@ -251,6 +322,21 @@ function phigrospp.restart()
     progress.judgeControl.pauseTime = 0 -- the ring a first tap on the pause button shows
   end
   emit("restart")
+end
+
+-- pausing(false): the song being played can't be paused from its button nor started again until it's left, for a
+-- play others wait on. the game still pauses when the app goes away: its menu then resumes or quits. pausing() says
+-- whether it can
+function phigrospp.pausing(allowed)
+  if allowed == false and not nonstop then
+    nonstop = {
+      hook(CS.JudgeControl, "CheckPause", { skip = function() return true end }),
+      -- the pause menu's Retry loads the level again
+      hook(CS.UnityEngine.SceneManagement.SceneManager, "LoadScene", { "System.String" },
+        { skip = function(name) return name == "Level" end }),
+    }
+  end
+  return not nonstop
 end
 
 -- whether a point of the screen (pixels) is on the pause button of the song being played
