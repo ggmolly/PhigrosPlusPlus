@@ -16,6 +16,9 @@ It comes with:
   replays and play stats.
 - **The phigros.tools leaderboard** in the game: the players by RKS, from a trophy next to the chapter screen's
   settings.
+- **Rooms**: up to 8 players play the chart their host picks at the same time, with its difficulty and modifiers,
+  each other's scores as the song goes and a chat. A room is open to anyone or behind a password, and
+  [phigros.tools](https://phigros.tools/rooms) shows the open ones live with the matches they played.
 - **A HUD** with the grade and accuracy the play is heading for and a hit error bar, and an option to skip the game's
   artificial loading delays.
 
