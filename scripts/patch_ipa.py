@@ -115,9 +115,10 @@ def hooked(dump, sources):
     found = set()
     for method in json.load(open(dump))["ScriptMethod"]:
         cls, _, name = method["Name"].rpartition("$$")
-        # a coroutine or lambda class (Outer.<Start>d__4) counts as its outer class, generic classes not at all
+        # a coroutine or lambda class (Outer.<Start>d__4) counts as its outer class, which a pattern finds by that
+        # name alone. another class is named with its namespace, and generic ones not at all
         outer = re.match(r"^(?:[\w.]*\.)?(\w+)\.<", cls)
-        if name in strings and (outer.group(1) in names if outer else "<" not in cls and cls.split(".")[-1] in names):
+        if name in strings and (outer.group(1) in names if outer else "<" not in cls and names.issuperset(cls.split("."))):
             found.add(method["Address"])
     return sorted(found)
 
