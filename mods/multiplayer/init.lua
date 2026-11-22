@@ -9,6 +9,7 @@ local MENUS = { ChapterSelector = true, SongSelector = true } -- where the room 
 local LEVELS = { EZ = true, HD = true, IN = true, AT = true }
 local RETRY, TRIES = 3, 10 -- seconds before a dropped connection is made again, and how many times
 local LOST = 20 -- seconds a match may take to reach its song
+local KEPT = 100 -- the chat lines kept, the oldest go first
 local NO_PROFILE = { "Rooms need a phigros.tools profile",
   "Turn on Sync to phigros.tools in the settings' Profile page, then come back." }
 local UNREACHABLE = { "Couldn't reach phigros.tools", "Check your connection and try again." }
@@ -130,6 +131,7 @@ function heard.chat(m)
     if p.player.id == m.player then name = p.player.name end
   end
   mp.chat[#mp.chat + 1] = { name = name, text = m.text }
+  if #mp.chat > KEPT then table.remove(mp.chat, 1) end
   screen.refresh()
 end
 

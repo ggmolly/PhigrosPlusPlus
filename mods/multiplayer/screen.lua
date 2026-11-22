@@ -304,14 +304,16 @@ return function(mp, room)
       end)
     end)
 
-    local last = mp.chat[#mp.chat]
-    part("chat", #mp.chat .. (last and last.text or ""), function(root)
-      for i = 1, LINES do
-        local said = mp.chat[#mp.chat - LINES + i]
-        if said then
-          text(root, { LEFT, 164 + (LINES - i + 0.5) * LINE }, 28, ("%s: %s"):format(said.name, said.text), WHITE, 3, nil, column)
-        end
+    -- it scrolls to its newest line, which is right above the text box even while the chat is short
+    part("chat", tostring(mp.chat[#mp.chat]), function(root)
+      local view = LINES * LINE
+      local list = kit.list(root, "phigrospp-room-chat", { LEFT, 164 }, { column, view })
+      local high = math.max(view, #mp.chat * LINE)
+      for i, said in ipairs(mp.chat) do
+        local y = high - (#mp.chat - i + 0.5) * LINE
+        text(list.rows, { 0, -y }, 28, ("%s: %s"):format(said.name, said.text), WHITE, 3, nil, column)
       end
+      list.content.sizeDelta, list.content.anchoredPosition = { 0, high }, { 0, high - view }
     end)
   end
 
