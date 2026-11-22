@@ -7,7 +7,7 @@ local UE = CS.UnityEngine
 local M, ui = phigrospp.modifiers, phigrospp.ui
 local NORMAL = { 0.08, 0.18, 0.22 } -- the game's perfect, good and bad windows in seconds
 local WINDOWS = { EZ = { 0.112, 0.252, 0.308 }, HR = { 0.057, 0.129, 0.157 } }
-local SPEEDS = { HT = 0.75, NC = 1.5 }
+local SPEEDS = { HT = 0.75, NC = 1.25 }
 local LANE, EDGE = 3, 7.5 -- Random moves the notes from -7.5 to 7.5 by lanes this wide
 local AHEAD = 0.1 -- seconds of music Nightcore's drums are scheduled ahead
 local BLACK = { 0, 0, 0, 1 }
