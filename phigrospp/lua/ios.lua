@@ -42,6 +42,8 @@ function phigrospp.frameRate() end
 -- screen's top one
 phigrospp.targetFrameRate = phigrospp.refreshRate
 
+function phigrospp.system() return UE.SystemInfo.operatingSystem end
+
 -- Library/ is the app's own, unlike Documents/ which the Files app shows
 function phigrospp.private() return os.getenv("HOME") .. "/Library" end
 

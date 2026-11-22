@@ -98,6 +98,13 @@ phigrospp.thermal = getter(call(activity(), "getSystemService", "(Ljava/lang/Str
 
 function phigrospp.targetFrameRate() return UE.Application.targetFrameRate end
 
+-- unity strips SystemInfo.operatingSystem on android
+function phigrospp.system()
+  local Version = JNI.FindClass("android/os/Build$VERSION")
+  local release = JNI.GetStaticObjectField(Version, JNI.GetStaticFieldID(Version, "RELEASE", "Ljava/lang/String;"))
+  return "Android " .. JNI.GetStringUTFChars(release)
+end
+
 -- the app's own folder, which no other app can read on any android: for secrets (the phigros.tools key)
 function phigrospp.private()
   local dir = call(activity(), "getFilesDir", "()Ljava/io/File;")
