@@ -1,5 +1,6 @@
 -- the rooms' screen, over the menus: the open rooms, then the one the player is in. its players are on the left (the
--- host under a crown, who's ready, the scores of the match played), its chart on the right, the chat under the players
+-- host under a crown, who's ready, spectators grayed, the scores of the match played), its chart on the right, the chat
+-- under the players
 
 local UE = CS.UnityEngine
 local kit, M = phigrospp.ui, phigrospp.modifiers
@@ -16,7 +17,7 @@ local GOLD, GREEN, RED = { 1, 0.82, 0.3, 1 }, { 0.6, 0.92, 0.55, 1 }, { 1, 0.5, 
 local LEVEL = { EZ = { 0.29, 0.66, 0.29, 1 }, HD = { 0.23, 0.47, 0.75, 1 }, IN = { 0.77, 0.23, 0.2, 1 },
   AT = { 0.29, 0.29, 0.32, 1 } }
 
--- mp is the mod's state (init.lua), room what it can do: send, enter, join, and shown
+-- mp is the mod's state (init.lua), room what it can do: send, enter, join, follow, seat, and shown
 return function(mp, room)
   local S = {}
   local canvas, width, font -- the canvas over the menu, as wide as the screen in its units
@@ -193,8 +194,20 @@ return function(mp, room)
     field.text = ""
   end
 
+  -- a spectator watches a player of the match, the host removes one otherwise
+  local function tapped(player)
+    local r = mp.room
+    local me, p = room.seat(r, mp.me.id), room.seat(r, player.id)
+    if not r.playing or not me.watching then
+      if r.host == mp.me.id then kick(player) end
+    elseif p and p.playing and me.able then
+      room.follow(p)
+    end
+  end
+
   -- what a player's row says on its right: their score while a match is played, else their place in the last one
   local function state(r, p)
+    if p.watching then return "Spectating", DIM end
     if r.playing and (p.playing or p.score > 0) then return ("%07d"):format(p.score), p.playing and WHITE or DIM end
     if r.chart and not p.able then return "No chart", RED end
     for _, play in ipairs(r.last and r.last.plays or {}) do
@@ -204,11 +217,8 @@ return function(mp, room)
   end
 
   local function drawRoom(r)
-    local me, column = nil, math.min(860, width * 0.5)
+    local me, column = room.seat(r, mp.me.id), math.min(860, width * 0.5)
     local host = r.host == mp.me.id
-    for _, p in ipairs(r.players) do
-      if p.player.id == mp.me.id then me = p end
-    end
 
     part("top", r.name, function(root)
       back(root, leave)
@@ -231,9 +241,20 @@ return function(mp, room)
       icon(root, { LEFT + box + 22, 120 }, 40, "send")
     end)
 
+    -- left of Invite: spectating, and how many watch from a browser
+    part("spectate", ("%s %d"):format(me.watching, r.watchers), function(root)
+      local x = width - 596
+      action(root, { x, TOP + 38 }, 260, "Spectate", function()
+        room.send({ t = "spectate", spectate = not me.watching })
+      end, me.watching and GOLD)
+      if r.watchers > 0 then
+        text(root, { x - 24, TOP }, 30, ("%d watching"):format(r.watchers), DIM, 5, { 1, 0.5 }) -- MiddleRight
+      end
+    end)
+
     local keys = { r.host }
     for i, p in ipairs(r.players) do
-      keys[i + 1] = ("%s %s %s %s"):format(p.player.id, p.ready, p.able, p.player.avatar)
+      keys[i + 1] = ("%s %s %s %s %s"):format(p.player.id, p.ready, p.able, p.watching, p.player.avatar)
     end
     part("players", table.concat(keys, "\n"), function(root)
       states = {}
@@ -242,12 +263,13 @@ return function(mp, room)
         local shape = kit.bar(root, "phigrospp-room-player", { LEFT + 20, H - 140 - (i - 1) * STEP }, { column, ROW },
           own and { 1, 1, 1, 0.18 } or FAINT)
         if p.player.id == r.host then icon(shape.transform, { 14, ROW / 2 }, 38, "crown", GOLD) end
-        kit.avatar(shape.transform, "phigrospp-room-avatar", { 64, ROW / 2 }, 52, p.player.avatar)
-        local name = text(shape.transform, { 132, ROW / 2 }, 34, p.player.name)
+        local avatar = kit.avatar(shape.transform, "phigrospp-room-avatar", { 64, ROW / 2 }, 52, p.player.avatar)
+        if p.watching then avatar.color = DIM end
+        local name = text(shape.transform, { 132, ROW / 2 }, 34, p.player.name, p.watching and DIM or WHITE)
         text(shape.transform, { 142 + name.preferredWidth, ROW / 2 }, 26, ("#%04d"):format(p.player.number), DIM)
         if p.ready then icon(shape.transform, { column - 64, ROW / 2 }, 38, "check", GREEN) end
         states[p.player.id] = text(shape.transform, { column - 84, ROW / 2 }, 30, "", DIM, 5, { 1, 0.5 }) -- MiddleRight
-        if host and not own then tappable(shape, function() kick(p.player) end) end
+        if not own then tappable(shape, function() tapped(p.player) end) end
       end
     end)
     for _, p in ipairs(r.players) do
@@ -256,7 +278,8 @@ return function(mp, room)
     end
 
     local chart = r.chart
-    part("chart", chart and ("%s %s %d %s %s"):format(chart.id, chart.level, chart.mods, me.able, r.playing) or tostring(host),
+    local key = chart and ("%s %s %d %s %s %s"):format(chart.id, chart.level, chart.mods, me.able, me.watching, r.playing)
+    part("chart", key or tostring(host),
       function(root)
         local x, wide = LEFT + column + 90, math.min(760, width - column - 210)
         if not chart then
@@ -275,16 +298,20 @@ return function(mp, room)
           rated and ("%s %.1f"):format(chart.level, rated.constant) or chart.level, WHITE)
         local strip = M.strip(root, chart.mods, { x + 196, y - 112 }, 52)
         if chart.mods ~= 0 then text(root, { x + 212 + strip.sizeDelta.x, y - 112 }, 30, M.multiplier(chart.mods), DIM) end
-        local note = r.playing and "A match is being played" or not me.able and "You don't have this chart, so you sit "
-          .. "this match out" or ""
+        local note = not me.able and "You don't have this chart, so you sit this match out"
+          or r.playing and (me.watching and "Tap a player to watch them play" or "A match is being played") or ""
         text(root, { x, y - 176 }, 28, note, me.able and DIM or RED, 3, nil, wide)
       end)
 
-    -- the host starts once everyone who has the chart is ready
-    local waiting = chart == nil
-    for _, p in ipairs(r.players) do waiting = waiting or p.player.id ~= r.host and p.able and not p.ready end
-    part("actions", ("%s %s %s %s %s"):format(host, r.playing, waiting, me.ready, me.able), function(root)
-      if r.playing then return end
+    -- the host starts once everyone who plays and has the chart is ready, and someone plays
+    local waiting, players = chart == nil, 0
+    for _, p in ipairs(r.players) do
+      players = players + (p.watching and 0 or 1)
+      waiting = waiting or p.player.id ~= r.host and not p.watching and p.able and not p.ready
+    end
+    waiting = waiting or players == 0
+    part("actions", ("%s %s %s %s %s %s"):format(host, r.playing, waiting, me.ready, me.able, me.watching), function(root)
+      if r.playing or not host and me.watching then return end
       local x = width - LEFT - BUTTON
       if not host then
         if not me.able then return action(root, { x, 158 }, BUTTON, "No chart") end

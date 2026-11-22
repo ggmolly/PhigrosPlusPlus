@@ -1,6 +1,7 @@
 -- rooms: players in a room play the chart its host picks at the same time, and see each other's scores. a tab on the
 -- chapter screen lists the open rooms of phigros.tools, which carries them over a socket (its server/rooms.ts says
--- what goes through it) and keeps the matches of the rooms without a password. a play in a room counts like any other
+-- what goes through it) and keeps the matches of the rooms without a password. a play in a room counts like any other.
+-- each play is streamed as it's played: a spectator of the room, or a browser watching it, follows one live
 
 local UE = CS.UnityEngine
 local ui, json, M = phigrospp.ui, phigrospp.json, phigrospp.modifiers
@@ -18,7 +19,7 @@ local ERRORS = {
   ["no-profile"] = NO_PROFILE,
   auth = { "phigros.tools doesn't know this device", "Sign in to your profile again in the settings' Profile page." },
   gone = { "This room is closed", "Its last player left it." },
-  full = { "This room is full", "A room takes 8 players." },
+  full = { "This room is full", "A room takes 8 players and 8 spectators." },
   kicked = { "The host removed you from this room", "You can't join it again." },
   rooms = { "No room is free", "Too many rooms are open on phigros.tools, try again later." },
   elsewhere = { "You joined from another device", "This one left the room." },
@@ -33,7 +34,9 @@ local screen
 local socket, online, unsent, tries = nil, false, {}, 0 -- online: the server knows who this is
 local entering -- the id of the room being joined (it may ask a password), true while one is made
 local checked -- the chart this game last said it has or not
-local match -- the match being played: { at =, started =, done =, sent = the score last sent }
+local match -- the match being played: { at =, started =, done =, sent = the score last sent, frames = those sent }
+-- the player of the match this spectator watches: { id =, parts = those heard, started = once their play shows }
+local spectating
 local dialogs = {} -- what waits for a menu to show its popup
 
 -- a function showing dialogs runs once a menu can show the game's popup, after the ones before it
@@ -96,13 +99,30 @@ function heard.welcome(m)
   local waiting = unsent
   unsent = {}
   for _, message in ipairs(waiting) do send(message) end
+  -- back from a dropped connection, the play followed goes on from the part missed
+  if spectating then send({ t = "follow", player = spectating.id, from = spectating.parts }) end
 end
 
 -- the room as it is now, none once out of it
+local function seat(room, id)
+  for _, p in ipairs(room.players) do
+    if p.player.id == id then return p end
+  end
+end
+
+-- a spectator watches a player's play from where it is, until it ends or they leave it (nil)
+local function follow(p)
+  spectating = p and { id = p.player.id, parts = 0 }
+  send({ t = "follow", player = p and p.player.id or "", from = 0 })
+  phigrospp.replay.follow(p and ("%s#%04d"):format(p.player.name, p.player.number))
+  screen.refresh()
+end
+
 function heard.room(m)
   local room, was = m.room, mp.room
   mp.room = room
   if not room then
+    if spectating then follow(nil) end
     mp.chat, mp.picking, checked, match = {}, false, nil, nil
     if not entering then hang() end
     return screen.refresh()
@@ -115,12 +135,21 @@ function heard.room(m)
     checked = key
     if chart and not phigrospp.unlocked(chart.id, chart.level) then send({ t = "able", able = false }) end
   end
+  -- the play followed ended once its player doesn't play any more, their last frames came before
+  local followed = spectating and seat(room, spectating.id)
+  if spectating and not (followed and followed.playing) then phigrospp.replay.feed() end
   screen.refresh()
+end
+
+function heard.frames(m)
+  if not spectating or m.player ~= spectating.id then return end
+  spectating.parts = spectating.parts + 1
+  phigrospp.replay.feed(phigrospp.unbase64(m.data))
 end
 
 function heard.start(m)
   local chart = mp.room.chart
-  match, mp.picking = { at = now(), sent = -1 }, false
+  match, mp.picking = { at = now(), sent = -1, frames = 0 }, false
   screen.refresh()
   phigrospp.play(chart.id, chart.level, chart.mods, m.seed)
 end
@@ -156,7 +185,7 @@ end
 -- called it then marks the song list as starting (onStart), which is taken back once it returned
 hook(CS.SongSelector, "GameStart", {
   skip = function(selector, index, level)
-    if not mp.room or match then return false end
+    if not mp.room or match or spectating then return false end
     after(0, function() selector.onStart = false end)
     local info = selector.SongItems._items[index].songInfo
     local difficulty = level < #info.levels and info.levels[level]
@@ -185,8 +214,9 @@ local function ranked()
   local list, mine = {}, stats()
   for _, p in ipairs(mp.room.players) do
     local own = p.player.id == mp.me.id
-    if p.playing or p.score > 0 or own then
-      list[#list + 1] = { name = p.player.name, score = own and mine and not match.done and mine.score or p.score, own = own }
+    local live = own and match and not match.done
+    if p.playing or p.score > 0 or live then
+      list[#list + 1] = { name = p.player.name, score = live and mine.score or p.score, own = own }
     end
   end
   table.sort(list, function(a, b) return a.score > b.score end)
@@ -195,9 +225,15 @@ end
 
 -- a song started again from the result screen is the player's own
 on("song", function()
-  if not match or match.done then return end
-  match.started, board = true, nil
-  phigrospp.pausing(false) -- the others wait on this play
+  if spectating then
+    spectating.started = true
+  elseif match and not match.done then
+    match.started = true
+    phigrospp.pausing(false) -- the others wait on this play
+  else
+    return
+  end
+  board = nil
   if not scores() then return end
   local u = UE.Screen.height / 1080
   local canvas = ui.overlay("phigrospp-room-scores", 32000).transform
@@ -209,19 +245,29 @@ on("song", function()
   end
 end)
 
+-- what was played since the last part of the stream, which waits for the connection like the rest: a part missing
+-- would break what the others watch
+local function stream()
+  local data
+  data, match.frames = phigrospp.replay.chunk(match.frames)
+  if data then send({ t = "frames", data = phigrospp.base64(data) }) end
+end
+
 every(0.5, function()
-  if not match then return end
-  if not match.started and now() - match.at > LOST then
+  if match and not match.started and now() - match.at > LOST then
     send({ t = "quit" })
     match = nil
     return screen.refresh()
   end
-  if not playing() or not mp.room then return end
-  local s = stats()
-  -- a score the connection can't take now is dropped, the next one says more
-  if online and not match.done and s.score ~= match.sent then
-    match.sent = s.score
-    send({ t = "score", score = s.score, accuracy = s.accuracy, combo = s.combo })
+  if not (match or spectating) or not playing() or not mp.room then return end
+  if match and not match.done then
+    stream()
+    local s = stats()
+    -- a score the connection can't take now is dropped, the next one says more
+    if online and s.score ~= match.sent then
+      match.sent = s.score
+      send({ t = "score", score = s.score, accuracy = s.accuracy, combo = s.combo })
+    end
   end
   if not board or not il2cpp.alive(board[1]) then return end
   local list = ranked()
@@ -234,6 +280,7 @@ end)
 
 on("finish", function(result)
   if not match or match.done then return end
+  stream()
   match.done = true
   send({ t = "result", score = result.score, accuracy = result.accuracy, maxcombo = result.maxcombo,
     perfect = result.perfect, good = result.good, bad = result.bad, miss = result.miss })
@@ -245,6 +292,7 @@ on("scene", function(name)
     if not match.done then send({ t = "quit" }) end
     match = nil
   end
+  if spectating and spectating.started and MENUS[name] then follow(nil) end
   screen.refresh()
 end)
 
@@ -266,8 +314,8 @@ on("update", function()
 end)
 
 -- shown: whether the room's screen has its place, in a menu while no match is played
-screen = require("screen")(mp, { send = send, enter = enter, join = join,
-  shown = function() return MENUS[scene()] and not match end })
+screen = require("screen")(mp, { send = send, enter = enter, join = join, follow = follow, seat = seat,
+  shown = function() return MENUS[scene()] and not match and not spectating end })
 
 on("scene", function(name)
   if name == "ChapterSelector" then ui.shortcut("users", screen.open) end
