@@ -173,6 +173,7 @@ end
 -- the panels, lists and videos of phigrospp.ui that are on screen
 local panels, lists, videos = {}, {}, {}
 local SLIDE = 0.35 -- seconds a panel takes to come and go
+local SCROLLBAR = 4 -- an upright list's scroll bar, wide
 
 -- calls each(item) for the ones whose object lives, an item whose object died with its scene or each() says is done
 -- (true) is forgotten
@@ -198,7 +199,17 @@ on("update", function()
   -- the rows slide sideways as they scroll, along the slant, like the game's lists. they're centred on the middle of
   -- the list: rows above it lean right and below it left
   live(lists, function(l)
-    if not l.width then return true end -- an upright one stays where it is
+    if not l.width then
+      -- an upright one stays where it is, with a bar on its right while what it holds is taller than it
+      local high, tall = l.transform.rect.m_Height, l.content.sizeDelta.y
+      l.bar.enabled = tall > high + 1
+      if not l.bar.enabled then return end
+      local length = high * high / tall
+      local scrolled = math.max(0, math.min(1, l.content.anchoredPosition.y / (tall - high)))
+      l.bar.transform.sizeDelta = { SCROLLBAR, length }
+      l.bar.transform.anchoredPosition = { l.transform.rect.m_Width - SCROLLBAR, (high - length) * (1 - scrolled) }
+      return
+    end
     local view, slope = l.transform.rect, CS.SettingItemsManager.InverseSlope
     l.rows.anchoredPosition = { (view.m_Width - l.width) / 2 + (view.m_Height / 2 + l.content.anchoredPosition.y) * slope, -16 }
   end)
@@ -291,7 +302,7 @@ phigrospp.ui = {
   end,
   -- a list scrolling like the game's: { transform = its view, content =, rows = }. rows `width` wide go in rows from
   -- its top (a bar at { -y * slope, -y }), and content.sizeDelta's y is the height they take. without a width it's
-  -- upright: what's put in rows scrolls straight up and down
+  -- upright: what's put in rows scrolls straight up and down, with a thin bar on its right
   list = function(parent, name, pos, size, width)
     local view = phigrospp.ui.rect(parent, name, pos, size, { 0, 0, 0, 0 }, { 0, 0 })
     view.raycastTarget = true -- drags between rows scroll too
@@ -305,6 +316,10 @@ phigrospp.ui = {
     local l = { transform = view.transform, width = width }
     l.content = stretched("Content", l.transform)
     l.rows = stretched("Rows", l.content)
+    if not width then
+      l.bar = phigrospp.ui.rect(view.transform, name .. "-bar", { 0, 0 }, { SCROLLBAR, 0 }, { 1, 1, 1, 0.3 }, { 0, 0 })
+      l.bar.enabled = false
+    end
     local scroll = view.gameObject:AddComponent(UE.UI.ScrollRect)
     scroll.viewport, scroll.content, scroll.horizontal = l.transform, l.content, false
     lists[#lists + 1] = l
