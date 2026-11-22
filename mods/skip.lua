@@ -25,16 +25,17 @@ local function entrance(first)
   for i = 0, sorted._size - 1 do
     local note = sorted._items[i]
     if note.realTime > first + INTRO then break end
-    local line = byLine[note.judgeLineIndex]
+    local index = note.judgeLineIndex // 2 -- the line and its side, the side's below when odd
+    local line = byLine[index]
     if not line then
-      local data = chart.judgeLineList._items[note.judgeLineIndex]
+      local data = chart.judgeLineList._items[index]
       local unit, events = 1.875 / data.bpm, data.speedEvents -- seconds per unit of an event's time
       line = { events = {}, notes = {}, at = 1 }
       for e = 0, events._size - 1 do
         local event = events._items[e]
         line.events[e + 1] = { start = event.startTime * unit, floor = event.floorPosition, speed = event.value }
       end
-      byLine[note.judgeLineIndex], lines[#lines + 1] = line, line
+      byLine[index], lines[#lines + 1] = line, line
     end
     -- a hold's speed is its length
     line.notes[#line.notes + 1] = { floor = note.floorPosition, speed = note.type == 3 and 1 or note.speed }
