@@ -85,16 +85,16 @@ logs:
 profile:
 	python3 scripts/profile.py $(APKS)/dump/script.json $(or $(SECONDS),10)
 
-# the signed bundle, its version line, the lib and the installer's manifest in out/ (needs the release key, see
-# scripts/release.sh)
-release: $(LIB)
+# the signed bundle, its version line, the lib, the installer's manifest and what patches the ios game in out/ (needs
+# the release key, see scripts/release.sh)
+release: $(LIB) $(IOS)
 	scripts/release.sh
 
 # a github release of phigrospp/VERSION with what release made. the installer has its own releases
 # (github.com/ggmolly/PhigrosPlusPlus-Installer) and patches the game with this one
 publish: release
 	gh release create v$$(cat phigrospp/VERSION) out/phigrospp.bundle out/phigrospp.version out/phigrospp.installer \
-		out/libphigrospp.so --title "Phigros++ $$(cat phigrospp/VERSION)" --generate-notes --latest
+		out/libphigrospp.so out/phigrospp.ios --title "Phigros++ $$(cat phigrospp/VERSION)" --generate-notes --latest
 
 dev: install push
 	adb logcat -c

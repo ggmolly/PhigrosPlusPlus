@@ -21,16 +21,18 @@ fi
 [ -n "${PHIGROSPP_SIGNING_KEY:-}" ] || PHIGROSPP_SIGNING_KEY=$(cat "$KEY")
 export PHIGROSPP_SIGNING_KEY
 [ -f "$MOD/build/libphigrospp.so" ] || { echo "build/libphigrospp.so is missing, run make lib" >&2; exit 1; }
+[ -f "$MOD/build/phigrospp.ios" ] || { echo "build/phigrospp.ios is missing, run make ios" >&2; exit 1; }
 "$MOD/scripts/bundle.sh"
 mkdir -p "$MOD/out"
 cp "$MOD/build/libphigrospp.so" "$MOD/out/libphigrospp.so"
 # the bundle, its first line, and for the installer (patcher/) a manifest of what it patches the game with:
 # "phigros++ installer 2", then "version", "native", "games" (android's, the installer's platform) and
 # "lib <sha256> <size>" lines. the number is what the release needs of the installer, an older one asks to be updated:
-# 2 is an app opened by phigrospp:// links
+# 2 is an app opened by phigrospp:// links. and what phigros.tools patches the ios game with (scripts/build-ios.ts),
+# signed like the bundle
 node -e '
   const crypto = require("crypto"), fs = require("fs");
-  const [bundle, trusted, out] = process.argv.slice(1);
+  const [bundle, trusted, out, ios] = process.argv.slice(1);
   const seed = Buffer.from(process.env.PHIGROSPP_SIGNING_KEY.trim(), "hex");
   const pkcs8 = Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), seed]);
   const key = crypto.createPrivateKey({ key: pkcs8, format: "der", type: "pkcs8" });
@@ -46,5 +48,6 @@ node -e '
   fs.writeFileSync(`${out}/phigrospp.bundle`, sign(message));
   fs.writeFileSync(`${out}/phigrospp.version`, message.subarray(0, message.indexOf(10) + 1));
   fs.writeFileSync(`${out}/phigrospp.installer`, sign(Buffer.from(manifest)));
-' "$MOD/build/phigrospp.bundle" "$MOD/phigrospp/release.pub" "$MOD/out"
+  fs.writeFileSync(`${out}/phigrospp.ios`, sign(fs.readFileSync(ios)));
+' "$MOD/build/phigrospp.bundle" "$MOD/phigrospp/release.pub" "$MOD/out" "$MOD/build/phigrospp.ios"
 echo "signed: $MOD/out/ ($(head -1 "$MOD/out/phigrospp.version"))"
