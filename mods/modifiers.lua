@@ -41,7 +41,7 @@ local function alpha(d)
   if has("HD") then a = a * clamp((d - 0.15) / 0.15) end
   if has("FL") then
     local lit = combo >= 200 and 0.625 or combo >= 100 and 0.8125 or 1
-    a = a * clamp((0.5 * lit - d) / (0.1 * lit))
+    a = a * clamp((0.7 * lit - d) / (0.15 * lit))
   end
   return a
 end
