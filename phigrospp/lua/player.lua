@@ -47,7 +47,8 @@ local function overlay(name) return kit.overlay(name, 32766) end
 
 -- "Replay", with whose it is when known
 local function title()
-  local by = replay.by()
+  local by, state = replay.by(), replay.state()
+  if state and state.stream then return ("Live (%s)"):format(by) end
   return by and ("Replay (%s)"):format(by) or "Replay"
 end
 
@@ -183,7 +184,7 @@ on("update", function()
   if not ui or not il2cpp.alive(ui.go) then ui, dragging = build(), nil end
   ui.mark:SetActive(true)
   -- the game's pause menu takes the taps while it's open
-  ui.go:SetActive(not replay.halted())
+  ui.go:SetActive(not replay.halted() and not state.stream) -- a stream plays as it comes, there's nothing to control
   if replay.halted() then
     shownUntil, dragging = 0, nil
     return
@@ -215,7 +216,7 @@ end)
 -- a chord's notes judged alike at once share one mark
 on("hit", function(hit)
   local state = replay.state()
-  if not state or hit.judgement == "perfect" then return end
+  if not state or not state.path or hit.judgement == "perfect" then return end
   local list = marks[state.path] or {}
   marks[state.path] = list
   local frame = math.max(state.cursor, 1)

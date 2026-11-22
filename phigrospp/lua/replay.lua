@@ -12,6 +12,7 @@ local SEEK_SPEED = 1024 -- recorded frames per screen frame while seeking or jud
 local SEEK_TIME = 0.008 -- seconds of a screen frame they may take
 local STARTED = 1e-4 -- seconds of song time, the game holds it at 1e-5 until its music plays
 local JUMPED = 0.5 -- seconds between two frames that only a jump of the song makes
+local DELAY = 2 -- seconds of a followed stream kept ahead of what plays, so frames coming late don't stall it
 
 if IO.Directory.Exists(ONLINE) then IO.Directory.Delete(ONLINE, true) end
 
@@ -23,6 +24,7 @@ local whose -- the name#number of the player of the replay started from the song
 local judged = {} -- the replays (by path) played through once since the game started, see on("song")
 local recorded, events, kept -- recording, and the play just kept until its result screen compares it with the record
 local playback, serving, hooks, simulating, enabled, cross -- watching
+local followed -- the stream of another player's play being followed: { player =, header =, frames =, over = }
 
 local function folder(id, difficulty) return ("%s/%s.%s"):format(DIR, id, difficulty) end
 
@@ -110,7 +112,7 @@ end
 local loaded
 local function watchedHeader()
   local path = watchNext or playback and playback.path
-  if not path then return nil end
+  if not path then return followed and followed.header end
   if not loaded or loaded.path ~= path then loaded = { path = path, header = file.header(phigrospp.read(path)) } end
   return loaded.header
 end
@@ -217,8 +219,8 @@ end
 -- the music plays along at normal and slow speeds, from where the replay is, and waits otherwise
 local function music(p)
   local source = level.progressControl.audioSource.audioSource
-  if p.paused or p.target or p.speed > 1 then return source:Pause() end
-  source.time = p.frames[p.cursor].t + level.progressControl._offset
+  if p.paused or p.starved or p.target or p.speed > 1 then return source:Pause() end
+  source.time = p.frames[math.max(p.cursor, 1)].t + level.progressControl._offset
   source.pitch = p.speed * phigrospp.speed() -- a replay of Half Time or Nightcore sounds like it was played
   source:UnPause()
 end
@@ -228,7 +230,7 @@ end
 local function plan(p)
   -- as many recorded frames as the screen frame lasted, one each when the screen runs at the recorded rate (see
   -- on("song")), more when it can't go that fast
-  p.credit = p.credit + (p.target and SEEK_SPEED or p.paused and 0 or
+  p.credit = p.credit + (p.target and SEEK_SPEED or (p.paused or p.starved) and 0 or
     p.speed * p.rate * Time.unscaledDeltaTime)
   local k = math.min(math.floor(p.credit), #p.frames - p.cursor, p.target and p.target - p.cursor or math.huge)
   p.credit = p.credit - math.floor(p.credit)
@@ -279,6 +281,25 @@ phigrospp.replay = {
     local selector = UE.Object.FindObjectOfType(CS.SongSelector)
     selector.enabled = true -- a page over the song list turns it off
     selector:NormalStart()
+  end,
+  -- plays another player's play as it's streamed (rooms): feed() takes each part chunk() made of it, the first one
+  -- starts its chart, feed() with nothing says it's over. follow() with nothing stops following
+  follow = function(player)
+    if not player and playback and playback.stream then phigrospp.leave() end
+    followed = player and { player = player, frames = {} }
+  end,
+  feed = function(data)
+    if not followed then return end
+    if not data then
+      followed.over = true
+      return
+    end
+    local h, frames = file.decode(data)
+    moveTouches(h, frames)
+    table.move(frames, 1, #frames, #followed.frames + 1, followed.frames)
+    if followed.header then return end
+    followed.header = h
+    phigrospp.play(h.id, h.difficulty, h.mods, h.seed)
   end,
   delete = function(path)
     assert(os.remove(path))
@@ -376,9 +397,14 @@ on("song", function(chart)
   level, enabled, uncounted = UE.Object.FindObjectOfType(CS.LevelControl), true, nil
   local path = watchNext
   watchNext = nil
+  local header, frames
   if path then
-    local header, frames = file.decode(phigrospp.read(path))
+    header, frames = file.decode(phigrospp.read(path))
     moveTouches(header, frames)
+  elseif followed and followed.header then
+    header, frames, whose = followed.header, followed.frames, followed.player
+  end
+  if header then
     -- the rate it was played at, which the screen's reported refresh rate isn't always (60 Hz on the tablet at 120),
     -- and the frame its music started at
     local seconds, first = 0, 1
@@ -391,21 +417,28 @@ on("song", function(chart)
     protect(true)
     quitButton()
     mode = "watch"
-    playback = { path = path, header = header, frames = frames, rate = rate, cursor = 0, credit = 0, live = true, extra = 0,
-      speed = 1, paused = false, first = first }
+    playback = { path = path, stream = not path and followed or nil, header = header, frames = frames, rate = rate,
+      cursor = 0, credit = 0, live = true, extra = 0, speed = 1, paused = false, first = first }
     -- the game stops the music for good where it ends, a replay ends where its frames do and can go back until then
     level.levelInformation.canLevelOver = false
-    -- the first time, it's played through fast and silently, so the seek bar marks every good, bad and miss before it
-    -- plays again from its start
-    if not judged[path] then
+    if path and not judged[path] then
+      -- the first time, it's played through fast and silently, so the seek bar marks every good, bad and miss before
+      -- it plays again from its start
       playback.judging, playback.target = true, #frames - 1
+    elseif not path then
+      -- a stream waits to be DELAY ahead, and one followed late is judged silently up to there first
+      local behind = #frames - math.floor(rate * DELAY)
+      playback.starved = true
+      if behind > first then playback.judging, playback.target = true, behind end
+    end
+    if playback.judging then
       playback.cameras = UE.Camera.allCameras -- nothing of it is drawn
       for i = 0, #playback.cameras - 1 do playback.cameras[i].enabled = false end
     end
-    print(("replay: watching %s, %d frames"):format(path, #frames))
+    print(("replay: watching %s, %d frames"):format(path or followed.player, #frames))
   else
     if phigrospp.charts.custom(chart.id) or phigrospp.modifiers.play() ~= 0 then protect(false) else unprotect() end
-    mode, recorded, events = record() and "record" or nil, {}, {}
+    mode, recorded, events = "record", {}, {}
   end
 end)
 
@@ -434,6 +467,10 @@ on("update", function()
     end
     p.countdown = nil
   end
+  if p.starved and not p.target and (#p.frames - p.cursor >= p.rate * DELAY or p.stream.over) then
+    p.starved = false
+    music(p)
+  end
   if p.live then
     p.cursor = p.cursor + 1
     -- the play jumped there (phigrospp.jump), its music follows
@@ -442,9 +479,12 @@ on("update", function()
   if not hooks then serve() end
   if p.extra > 0 then simulate(p, p.extra) end
   if p.judging and p.cursor >= p.target then
-    judged[p.path], p.judging = true, nil
+    p.judging = nil
     for i = 0, #p.cameras - 1 do p.cameras[i].enabled = true end
-    return rewind(p, 1)
+    if not p.stream then
+      judged[p.path] = true
+      return rewind(p, 1)
+    end
   end
   if p.target and p.cursor >= p.target then
     p.target = nil
@@ -456,6 +496,11 @@ on("update", function()
   if serving then
     serving.structs = structs(serving.touches)
     return
+  end
+  -- a stream holds still until more of it comes
+  if p.stream and not p.stream.over then
+    p.starved, serving = true, still(p.frames[p.cursor])
+    return music(p)
   end
   -- a recording stops where the game ended the song, so the replay ends it there too and holds that last moment,
   -- whatever the music's clock says
@@ -476,37 +521,53 @@ on("restart", function()
   if mode == "record" then recorded, events = {}, {} end
 end)
 
--- a watched replay checks it gave the recorded result, a recorded play is written with its result
+-- the header of the play being recorded, with its result. a part of it streamed leaves out how it was played, which
+-- takes reading every file
+local function header(result, streamed)
+  local chart, mods, seed = playing(), phigrospp.modifiers.play()
+  local h = { id = chart.id, difficulty = chart.difficulty, width = Screen.width, height = Screen.height,
+    date = os.time(), duration = recorded[#recorded].t, accuracy = result.accuracy,
+    offset = level.progressControl._offset, mirror = chart.mirror and 1 or 0,
+    challenge = level.progressControl._inChallengeMode and 1 or 0, mods = mods, seed = seed }
+  for _, field in ipairs(RESULT) do h[field] = result[field] end
+  local how = streamed and { game = 0, phigrospp = "", device = "", os = "", refresh = 0, fps = 0, files = "",
+    dpi = Screen.dpi } or played()
+  for key, value in pairs(how) do h[key] = value end
+  return h
+end
+
+-- the frames recorded after the first `from` as a replay of their own, and how many are recorded now: a play is
+-- streamed with it (rooms). nil while nothing new was
+function phigrospp.replay.chunk(from)
+  if mode ~= "record" or #recorded <= from then return nil, from end
+  return file.encode(header(stats(), true), table.move(recorded, from + 1, #recorded, 1, {}), {}), #recorded
+end
+
+-- a watched replay checks it gave the recorded result, a recorded play is written with its result (when it's on)
 on("finish", function(result)
-  if mode == "watch" then
-    local header, differences = playback.header, {}
+  if mode == "watch" and not playback.stream then
+    local h, differences = playback.header, {}
     for _, field in ipairs(RESULT) do
-      if result[field] ~= header[field] then
-        differences[#differences + 1] = ("%s %s, recorded %s"):format(field, result[field], header[field])
+      if result[field] ~= h[field] then
+        differences[#differences + 1] = ("%s %s, recorded %s"):format(field, result[field], h[field])
       end
     end
     print("replay: " .. (#differences == 0 and "same result as recorded" or table.concat(differences, ", ")))
   end
-  if mode ~= "record" then return end
-  local chart = playing()
-  local mods, seed = phigrospp.modifiers.play()
-  local header = { id = chart.id, difficulty = chart.difficulty, width = Screen.width, height = Screen.height,
-    date = os.time(), duration = recorded[#recorded].t, accuracy = result.accuracy,
-    offset = level.progressControl._offset, mirror = chart.mirror and 1 or 0,
-    challenge = level.progressControl._inChallengeMode and 1 or 0, mods = mods, seed = seed }
-  for _, field in ipairs(RESULT) do header[field] = result[field] end
-  for key, value in pairs(played()) do header[key] = value end
+  if mode ~= "record" or not record() then return end
+  local chart, mods = playing(), phigrospp.modifiers.play()
+  local h = header(result)
   local dir = folder(chart.id, chart.difficulty)
   IO.Directory.CreateDirectory(dir)
   -- the best the player had on the chart with these modifiers, which is only what their replays say
   local best = mods ~= 0 and phigrospp.replay.bests(phigrospp.replay.list(chart.id, chart.difficulty))[mods]
-  local path, data = ("%s/%d.pigeon"):format(dir, header.date), file.encode(header, recorded, events)
+  local path, data = ("%s/%d.pigeon"):format(dir, h.date), file.encode(h, recorded, events)
   phigrospp.write(path, data)
   print(("replay: %s, %d frames, %d bytes"):format(path, #recorded, #data))
   phigrospp.emit("replays")
   if mods == 0 then
-    kept = { path = path, score = header.score }
-  elseif not phigrospp.charts.custom(chart.id) and (not best or header.score >= best.header.score) then
+    kept = { path = path, score = h.score }
+  elseif not phigrospp.charts.custom(chart.id) and (not best or h.score >= best.header.score) then
     phigrospp.emit("best", path)
   end
 end)
@@ -542,7 +603,11 @@ end)
 -- a replay restarted from the game's pause menu is watched again, the song list forgets it
 on("leave", function()
   if mode == "watch" then
-    if not playback.taken then watchNext = watchNext or playback.path end
+    if playback.stream then
+      followed = nil
+    elseif not playback.taken then
+      watchNext = watchNext or playback.path
+    end
     phigrospp.frameRate()
   end
   unserve()
