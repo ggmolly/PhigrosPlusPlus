@@ -109,8 +109,12 @@ return function(F)
     draw()
   end
 
+  -- the rooms' screen leaves its place while this one shows ("friends" tells it)
+  function S.showing() return open == true end
+
   function S.open()
     open = true
+    phigrospp.emit("friends")
     F.wake()
     -- the song list reads the touches itself: it's off under the screen, unless a page turned it off already
     selector = scene() == "SongSelector" and not kit.paging() and UE.Object.FindObjectOfType(CS.SongSelector) or nil
@@ -120,6 +124,7 @@ return function(F)
   function S.close()
     if not open then return end
     open = false
+    phigrospp.emit("friends")
     if il2cpp.alive(selector) then selector.enabled = true end
     S.refresh()
   end

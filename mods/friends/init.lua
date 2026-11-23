@@ -139,7 +139,19 @@ function heard.friends(m)
     if rank(a) ~= rank(b) then return rank(a) < rank(b) end
     return a.order < b.order
   end)
-  if was then changes(was) end
+  if was then
+    changes(was)
+  else
+    -- the first list of a launch: the requests that came while the game was closed are told together
+    local asking = 0
+    for _, f in ipairs(F.friends) do asking = asking + (f.state == "incoming" and 1 or 0) end
+    if asking > 0 then
+      toast(("%d pending friend request%s"):format(asking, asking == 1 and "" or "s"), { icon = "users", seconds = 8,
+        tap = function()
+          if MENUS[scene()] then screen.open() end
+        end })
+    end
+  end
   -- the play watched ended once its player plays something else or nothing, their last frames came before. one that
   -- ended before any came never shows
   local f = watching and friend(watching.id)
@@ -267,7 +279,7 @@ end
 function F.wake() parked, retry = false, 0 end
 
 screen = require("screen")(F)
-F.open = screen.open -- and F.rooms opens the rooms' screen, theirs to set
+F.open, F.close, F.showing = screen.open, screen.close, screen.showing -- F.rooms opens the rooms', theirs to set
 
 -- the avatar of the song list opens the screen. without a profile the game slides the player's name out as it does
 on("scene", function(name)
