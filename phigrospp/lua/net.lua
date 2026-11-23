@@ -78,9 +78,11 @@ end
 function phigrospp.request(method, path, body, done) phigrospp.fetch(method, HOST .. path, body, done) end
 
 -- the server checks the signature of "<method> <path>\n<time><body>" and that the time (ms) only goes forward. a clock
--- that ran ahead once leaves the server a later time: it answers 409 with it, and the request goes again after it
+-- that ran ahead once leaves the server a later time: it answers 409 with it, and the request goes again after it.
+-- requests go one at a time, so they reach the server in the order of their times
 local DOMAIN = "phigros.tools request v1\0" -- the key also signs replays, a signature is only good for one use
 local stamp = 0
+local queue = {}
 
 local function send(method, path, body, done, again)
   local identity = phigrospp.identity
@@ -88,13 +90,20 @@ local function send(method, path, body, done, again)
   local message = string.pack("<i8", stamp) .. body
   local signature = identity.sign(DOMAIN .. ("%s %s\n"):format(method, path) .. message)
   phigrospp.request(method, path, identity.public() .. signature .. message, function(status, response)
-    if status ~= 409 or again then return done(status, response) end
-    stamp = math.max(stamp, math.tointeger(tonumber(response:match("\"last\":%s*(%d+)"))))
-    send(method, path, body, done, true)
+    if status == 409 and not again then
+      stamp = math.max(stamp, math.tointeger(tonumber(response:match("\"last\":%s*(%d+)"))))
+      return send(method, path, body, done, true)
+    end
+    table.remove(queue, 1)
+    if queue[1] then send(table.unpack(queue[1])) end
+    done(status, response)
   end)
 end
 
-function phigrospp.signed(method, path, body, done) send(method, path, body, done) end
+function phigrospp.signed(method, path, body, done)
+  queue[#queue + 1] = { method, path, body, done }
+  if #queue == 1 then send(method, path, body, done) end
+end
 
 on("update", function()
   for i = #pending, 1, -1 do
