@@ -12,6 +12,7 @@ local ROW, STEP = 68, 78 -- a player's row, and from a row to the next
 local LINES, LINE = 3, 36 -- the chat lines shown, and their height
 local BUTTON, GAP = 210, 16 -- the buttons at the bottom right: the host has three
 local REFRESH = 4 -- seconds between two reads of the open rooms
+local NAMING = "Name it in 24 characters at most, or leave it empty to name it after you."
 local WHITE, DIM, FAINT, DARK = { 1, 1, 1, 1 }, { 1, 1, 1, 0.5 }, { 1, 1, 1, 0.08 }, { 0.02, 0.13, 0.17, 1 }
 local GOLD, GREEN, RED = { 1, 0.82, 0.3, 1 }, { 0.6, 0.92, 0.55, 1 }, { 1, 0.5, 0.5, 1 }
 local LEVEL = { EZ = { 0.29, 0.66, 0.29, 1 }, HD = { 0.23, 0.47, 0.75, 1 }, IN = { 0.77, 0.23, 0.2, 1 },
@@ -117,8 +118,7 @@ return function(mp, room)
 
   -- a room is named first, then given a password or none
   local function create()
-    local named, name = kit.confirm({ title = "Create a room", input = "Room name", yes = "Next",
-      message = "Name it in 24 characters at most, or leave it empty for a room named after you." })
+    local named, name = kit.confirm({ title = "Create a room", input = "Room name", yes = "Next", message = NAMING })
     if not named then return end
     local made, password = kit.confirm({ title = "Protect it with a password?", input = "Password", yes = "Create",
       message = "Leave it empty for a room anyone can join, whose matches show on phigros.tools. With a password "
@@ -169,11 +169,22 @@ return function(mp, room)
     end
   end
 
-  local function kick(player)
-    if kit.confirm({ title = ("Remove %s#%04d?"):format(player.name, player.number), yes = "Remove", danger = true,
-        message = "They can't join this room again." }) then
-      room.send({ t = "kick", player = player.id })
+  local function rename()
+    local ok, name = kit.confirm({ title = "Rename the room", input = "Room name", yes = "Rename", message = NAMING })
+    if ok then room.send({ t = "rename", name = name }) end
+  end
+
+  -- the host hands the room to a player or removes them
+  local function manage(player)
+    local function choice(name, label, colour, t)
+      return { icon = kit.icon(name), label = label, colour = colour, tap = function() kit.close(t) end,
+        on = function() return false end, note = function() return "" end }
     end
+    local t = kit.confirm({ title = ("%s#%04d"):format(player.name, player.number), yes = false,
+      grid = { columns = 2, height = 190, cells = {
+        choice("crown", "Make host", GOLD, "host"),
+        choice("x", "Remove", RED, "kick") } } })
+    if t then room.send({ t = t, player = player.id }) end
   end
 
   -- the host's modifiers become the room's
@@ -199,7 +210,7 @@ return function(mp, room)
     local r = mp.room
     local me, p = room.seat(r, mp.me.id), room.seat(r, player.id)
     if not r.playing or not me.watching then
-      if r.host == mp.me.id then kick(player) end
+      if r.host == mp.me.id then manage(player) end
     elseif p and p.playing and me.able then
       room.follow(p)
     end
@@ -220,10 +231,8 @@ return function(mp, room)
     local me, column = room.seat(r, mp.me.id), math.min(860, width * 0.5)
     local host = r.host == mp.me.id
 
-    part("top", r.name, function(root)
+    part("top", r.id, function(root)
       back(root, leave)
-      local title = text(root, { 220, TOP }, 56, r.name)
-      if r.locked then icon(root, { 244 + title.preferredWidth, TOP }, 40, "lock", DIM) end
       action(root, { width - 320, TOP + 38 }, 260, "Invite", function()
         phigrospp.share(("%s/rooms/%s"):format(phigrospp.site, r.id))
       end)
@@ -239,6 +248,18 @@ return function(mp, room)
       hint.text, field.placeholder = "Say something to the room", hint
       tappable(kit.rect(root, "phigrospp-room-send", { LEFT + box + 12, 120 }, { 60, 60 }, FAINT), say)
       icon(root, { LEFT + box + 22, 120 }, 40, "send")
+    end)
+
+    -- the host renames the room by tapping its name
+    part("title", ("%s %s"):format(host, r.name), function(root)
+      local x = 244 + text(root, { 220, TOP }, 56, r.name).preferredWidth
+      if r.locked then
+        icon(root, { x, TOP }, 40, "lock", DIM)
+        x = x + 56
+      end
+      if not host then return end
+      icon(root, { x, TOP }, 40, "pencil", DIM)
+      tappable(kit.rect(root, "phigrospp-room-rename", { 200, TOP }, { x + 60 - 200, 110 }, { 0, 0, 0, 0 }), rename)
     end)
 
     -- left of Invite: spectating, and how many watch from a browser
