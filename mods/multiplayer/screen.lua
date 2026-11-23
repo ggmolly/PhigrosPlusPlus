@@ -1,6 +1,6 @@
 -- the rooms' screen, over the menus: the open rooms, then the one the player is in. its players are on the left (the
--- host under a crown, who's ready, spectators grayed, the scores of the match played), its chart on the right, the chat
--- under the players
+-- host under a crown, what each plays the chart with, who's ready, spectators grayed, the scores of the match played),
+-- its chart on the right over the ones queued after it, the chat under the players
 
 local UE = CS.UnityEngine
 local kit, M = phigrospp.ui, phigrospp.modifiers
@@ -8,6 +8,7 @@ local chooser = require("modifiers")
 local SLOPE = CS.SettingItemsManager.InverseSlope -- the game's slant: sideways per unit of height
 local ROW, STEP = 68, 78 -- a player's row, and from a row to the next
 local LINES, LINE = 3, 36 -- the chat lines shown, and their height
+local QUEUED = 60 -- from a queued chart's row to the next
 local BUTTON, GAP = 210, 16 -- the buttons at the bottom right: the host has three
 local REFRESH = 4 -- seconds between two reads of the open rooms
 local NAMING = "Name it in 24 characters at most, or leave it empty to name it after you."
@@ -15,6 +16,7 @@ local C = kit.colours
 local WHITE, DIM, FAINT, DARK, GOLD, GREEN, RED = C.white, C.dim, C.faint, C.dark, C.gold, C.green, C.red
 local LEVEL = { EZ = { 0.29, 0.66, 0.29, 1 }, HD = { 0.23, 0.47, 0.75, 1 }, IN = { 0.77, 0.23, 0.2, 1 },
   AT = { 0.29, 0.29, 0.32, 1 } }
+local LEVELS = { "EZ", "HD", "IN", "AT" }
 
 -- mp is the mod's state (init.lua), room what it can do: send, enter, join, follow, seat, shown, and the friends mod
 return function(mp, room)
@@ -26,6 +28,10 @@ return function(mp, room)
   local field -- the chat's text box
   local listing, rooms, polling -- the list is open, the rooms it shows (false when they can't be read), its timer
   local states -- each player's text on the right of their row, by id
+  local queue -- the queue as drawn: { list =, rows = { { t = its transform, chart = } }, wide =, host = }
+  -- the row of it the host drags: { i = its place, to = where it would go, finger =, y = where it began, shape =,
+  -- colour = the row's own }
+  local moving
 
   -- the open rooms ---------------------------------------------------------------------------------------------------
 
@@ -141,15 +147,40 @@ return function(mp, room)
       grid = #cells > 0 and { columns = 4, height = 190, cells = cells } or nil })
   end
 
-  -- the host's modifiers become the room's
+  -- what the player plays the room's chart with: their own modifiers, and the next level of the song they have
   local function modifiers()
-    local chart = mp.room.chart
-    if not M.fits(chart.id, chart.level) then
+    local chart, me = mp.room.chart, room.seat(mp.room, mp.me.id)
+    if not M.fits(chart.id, me.level) then
       return kit.confirm({ title = "Modifiers", message = chooser.PLAIN, yes = "OK", no = false })
     end
-    M.pick(chart.mods)
+    M.pick(me.mods)
     chooser.choose()
-    room.send({ t = "chart", song = chart.id, level = chart.level, mods = M.pick() })
+    room.send({ t = "pick", level = me.level, mods = M.pick() })
+  end
+
+  local function level()
+    local chart, me = mp.room.chart, room.seat(mp.room, mp.me.id)
+    local at
+    for i, name in ipairs(LEVELS) do
+      if name == me.level then at = i end
+    end
+    for i = 1, #LEVELS - 1 do
+      local next = LEVELS[(at + i - 1) % #LEVELS + 1]
+      if phigrospp.unlocked(chart.id, next) then
+        return room.send({ t = "pick", level = next, mods = M.fits(chart.id, next) and me.mods or 0 })
+      end
+    end
+  end
+
+  -- a chart is taken out of the room by the one who added it, or by the host
+  local function mine(chart) return chart.by == mp.me.id or mp.room.host == mp.me.id end
+
+  local function unqueue(chart)
+    local s = song(chart.id)
+    if kit.confirm({ title = ("Remove %s?"):format(s and s.name or chart.song), yes = "Remove", danger = true,
+        message = "The room plays the next chart of its queue instead." }) then
+      room.send({ t = "unqueue", entry = chart.entry })
+    end
   end
 
   local function say()
@@ -165,7 +196,7 @@ return function(mp, room)
     local me, p = room.seat(r, mp.me.id), room.seat(r, player.id)
     if not r.playing or not me.watching then
       manage(player)
-    elseif p and p.playing and me.able then
+    elseif p and p.playing and phigrospp.unlocked(r.chart.id, p.level) then
       room.follow(p)
     end
   end
@@ -173,7 +204,9 @@ return function(mp, room)
   -- what a player's row says on its right: their score while a match is played, else their place in the last one
   local function state(r, p)
     if p.watching then return "Spectating", DIM end
-    if r.playing and (p.playing or p.score > 0) then return ("%07d"):format(p.score), p.playing and WHITE or DIM end
+    if r.playing and (p.playing or p.score > 0) then
+      return ("%07d"):format(M.total(p.score, p.mods)), p.playing and WHITE or DIM
+    end
     if r.chart and not p.able then return "No chart", RED end
     for _, play in ipairs(r.last and r.last.plays or {}) do
       if play.player.id == p.player.id then return ("#%d  %07d"):format(play.rank, play.total), DIM end
@@ -228,7 +261,8 @@ return function(mp, room)
 
     local keys = { r.host }
     for i, p in ipairs(r.players) do
-      keys[i + 1] = ("%s %s %s %s %s"):format(p.player.id, p.ready, p.able, p.watching, p.player.avatar)
+      keys[i + 1] = ("%s %s %s %s %s %s %s"):format(p.player.id, p.ready, p.able, p.watching, p.player.avatar,
+        r.chart and p.level, p.mods)
     end
     part("players", table.concat(keys, "\n"), function(root)
       states = {}
@@ -243,6 +277,12 @@ return function(mp, room)
         text(shape.transform, { 142 + name.preferredWidth, ROW / 2 }, 26, ("#%04d"):format(p.player.number), DIM)
         if p.ready then icon(shape.transform, { column - 64, ROW / 2 }, 38, "check", GREEN) end
         states[p.player.id] = text(shape.transform, { column - 84, ROW / 2 }, 30, "", DIM, 5, { 1, 0.5 }) -- MiddleRight
+        -- what they play the chart with, before what their row says
+        if r.chart and not p.watching then
+          plate(shape.transform, { column - 364, ROW - 16 }, { 70, 36 }, LEVEL[p.level], 24, p.level, WHITE)
+          local strip = M.strip(shape.transform, p.mods, { 0, ROW / 2 }, 32)
+          strip.anchoredPosition = { column - 386 - strip.sizeDelta.x, ROW / 2 }
+        end
         if not own then tappable(shape, function() tapped(p.player) end) end
       end
     end)
@@ -251,59 +291,101 @@ return function(mp, room)
       t.text, t.color = state(r, p)
     end
 
+    -- the chart the room is on, at the level and with the modifiers the player picked: a tap on the level goes to
+    -- the next one they have
     local chart = r.chart
-    local key = chart and ("%s %s %d %s %s %s"):format(chart.id, chart.level, chart.mods, me.able, me.watching, r.playing)
-    part("chart", key or tostring(host),
-      function(root)
-        local x, wide = LEFT + column + 90, math.min(760, width - column - 210)
-        if not chart then
-          return text(root, { x + wide / 2, H / 2 + 60 }, 38, host and "Choose the chart everyone plays"
-            or "The host is choosing a chart", DIM, 4, { 0.5, 0.5 })
-        end
-        local s, high = song(chart.id), math.floor(wide * 0.527) -- as wide for its height as the game's covers
-        local cover = kit.place(root, "phigrospp-room-cover", UE.UI.Image, { x, H - 140 }, { wide, high }, { 0, 1 })
-        cover.color = s and WHITE or FAINT -- a song this version of the game doesn't have has no cover
-        if s then cover.gameObject:AddComponent(CS.AddressableImageLoader).Code = CS.IdBuilder.BuildCoverImageId(chart.id, "") end
-        local y = H - 140 - high - 46
-        text(root, { x, y }, 44, s and s.name or chart.song, WHITE, 3, nil, wide)
-        text(root, { x, y - 50 }, 28, s and s.composer or "", DIM, 3, nil, wide)
-        local rated = s and s.charts[chart.level]
-        plate(root, { x, y - 84 }, { 170, 56 }, LEVEL[chart.level], 30,
-          rated and ("%s %.1f"):format(chart.level, rated.constant) or chart.level, WHITE)
-        local strip = M.strip(root, chart.mods, { x + 196, y - 112 }, 52)
-        if chart.mods ~= 0 then text(root, { x + 212 + strip.sizeDelta.x, y - 112 }, 30, M.multiplier(chart.mods), DIM) end
-        local note = not me.able and "You don't have this chart, so you sit this match out"
-          or r.playing and (me.watching and "Tap a player to watch them play" or "A match is being played") or ""
-        text(root, { x, y - 176 }, 28, note, me.able and DIM or RED, 3, nil, wide)
-      end)
+    local key = chart and ("%d %s %d %s %s %s %s"):format(chart.entry, me.level, me.mods, me.able, me.watching, r.playing,
+      host)
+    local cx, wide = LEFT + column + 90, math.min(760, width - column - 210)
+    local tall = math.floor(wide * 0.527) -- as wide for its height as the game's covers
+    local cy = H - 140 - tall - 46
+    part("chart", key or "", function(root)
+      if not chart then
+        return text(root, { cx + wide / 2, H / 2 + 60 }, 38, "Add the chart everyone plays", DIM, 4, { 0.5, 0.5 })
+      end
+      local s = song(chart.id)
+      local cover = kit.place(root, "phigrospp-room-cover", UE.UI.Image, { cx, H - 140 }, { wide, tall }, { 0, 1 })
+      cover.color = s and WHITE or FAINT -- a song this version of the game doesn't have has no cover
+      if s then cover.gameObject:AddComponent(CS.AddressableImageLoader).Code = CS.IdBuilder.BuildCoverImageId(chart.id, "") end
+      if mine(chart) and not r.playing then
+        tappable(kit.rect(root, "phigrospp-room-remove", { cx + wide, H - 140 }, { 72, 72 }, { 0, 0, 0, 0.6 }, { 1, 1 }),
+          function() unqueue(chart) end)
+        icon(root, { cx + wide - 56, H - 176 }, 40, "x")
+      end
+      text(root, { cx, cy }, 44, s and s.name or chart.song, WHITE, 3, nil, wide)
+      text(root, { cx, cy - 50 }, 28, s and s.composer or "", DIM, 3, nil, wide)
+      local rated = s and s.charts[me.level]
+      local picked = plate(root, { cx, cy - 84 }, { 170, 56 }, LEVEL[me.level], 30,
+        rated and ("%s %.1f"):format(me.level, rated.constant) or me.level, WHITE)
+      if not r.playing then tappable(picked, level) end
+      local strip = M.strip(root, me.mods, { cx + 196, cy - 112 }, 52)
+      if me.mods ~= 0 then text(root, { cx + 212 + strip.sizeDelta.x, cy - 112 }, 30, M.multiplier(me.mods), DIM) end
+      local note = not me.able and "You don't have this chart at this level, tap the level for another"
+        or r.playing and (me.watching and "Tap a player to watch them play" or "A match is being played") or ""
+      text(root, { cx, cy - 176 }, 28, note, me.able and DIM or RED, 3, nil, wide)
+    end)
 
-    -- the host starts once everyone who plays and has the chart is ready, and someone plays
+    -- the charts queued after it, as rows like the players': the level each was added at, its song, who added it,
+    -- and a cross on the ones the player may take back (theirs, or any for the host, who also moves them)
+    local entries = {}
+    for i, queued in ipairs(r.queue) do entries[i] = queued.entry .. queued.by end
+    part("queue", ("%s %s"):format(host, table.concat(entries, " ")), function(root)
+      queue = nil
+      if #r.queue == 0 then return end
+      local top = cy - 220
+      text(root, { cx, top }, 30, ("Up next (%d)"):format(#r.queue))
+      local list = kit.list(root, "phigrospp-room-queue", { cx - 16, 182 }, { wide + 16, top - 212 })
+      queue = { list = list, rows = {}, wide = wide, host = host }
+      for i, queued in ipairs(r.queue) do
+        local s, by = song(queued.id), room.seat(r, queued.by)
+        local shape = kit.bar(list.rows, "phigrospp-room-queued", { 16, -(i - 1) * QUEUED }, { wide, QUEUED - 8 },
+          queued.by == mp.me.id and { 1, 1, 1, 0.18 } or FAINT)
+        local middle = (QUEUED - 8) / 2
+        plate(shape.transform, { 16, QUEUED - 16 }, { 66, QUEUED - 24 }, LEVEL[queued.level], 22, queued.level, WHITE)
+        text(shape.transform, { 96, middle }, 28, s and s.name or queued.song, WHITE, 3, nil, wide * 0.52)
+        local ends = wide - 28
+        if mine(queued) then
+          ends = ends - 44
+          icon(shape.transform, { ends + 14, middle }, 30, "x", DIM)
+          tappable(kit.rect(shape.transform, "phigrospp-room-unqueue", { ends, middle }, { 60, QUEUED - 8 }, { 0, 0, 0, 0 }),
+            function() unqueue(queued) end)
+        end
+        text(shape.transform, { ends, middle }, 24, by and by.player.name or "", DIM, 5, { 1, 0.5 }) -- MiddleRight
+        queue.rows[i] = { t = shape.transform, chart = queued }
+      end
+      list.content.sizeDelta = { 0, #r.queue * QUEUED }
+    end)
+
+    -- the host starts once everyone who plays and has the chart is ready, and someone plays. everyone adds charts
+    -- and picks their modifiers
     local waiting, players = chart == nil, 0
     for _, p in ipairs(r.players) do
-      players = players + (p.watching and 0 or 1)
+      players = players + ((p.watching or not p.able) and 0 or 1)
       waiting = waiting or p.player.id ~= r.host and not p.watching and p.able and not p.ready
     end
     waiting = waiting or players == 0
-    part("actions", ("%s %s %s %s %s %s"):format(host, r.playing, waiting, me.ready, me.able, me.watching), function(root)
-      if r.playing or not host and me.watching then return end
-      local x = width - LEFT - BUTTON
-      if not host then
-        if not me.able then return action(root, { x, 158 }, BUTTON, "No chart") end
-        return action(root, { x, 158 }, BUTTON, "Ready", function()
-          room.send({ t = "ready", ready = not me.ready })
-        end, me.ready and GREEN)
-      end
-      action(root, { x, 158 }, BUTTON, "Start", not waiting and function() room.send({ t = "start" }) end,
-        not waiting and GREEN)
-      if chart then
-        x = x - BUTTON - GAP
-        action(root, { x, 158 }, BUTTON, "Modifiers", modifiers)
-      end
-      action(root, { x - BUTTON - GAP, 158 }, BUTTON, "Chart", function()
-        mp.picking = true
-        S.refresh()
+    part("actions", ("%s %s %s %s %s %s %s"):format(host, r.playing, waiting, me.ready, me.able, me.watching, chart ~= nil),
+      function(root)
+        if r.playing or not host and me.watching then return end
+        local x = width - LEFT - BUTTON
+        if host then
+          action(root, { x, 158 }, BUTTON, "Start", not waiting and function() room.send({ t = "start" }) end,
+            not waiting and GREEN)
+        elseif chart and me.able then
+          action(root, { x, 158 }, BUTTON, "Ready", function() room.send({ t = "ready", ready = not me.ready }) end,
+            me.ready and GREEN)
+        else
+          action(root, { x, 158 }, BUTTON, chart and "No chart" or "Ready")
+        end
+        if chart then
+          x = x - BUTTON - GAP
+          action(root, { x, 158 }, BUTTON, "Modifiers", modifiers)
+        end
+        action(root, { x - BUTTON - GAP, 158 }, BUTTON, "Add chart", function()
+          mp.picking = true
+          S.refresh()
+        end)
       end)
-    end)
 
     -- it scrolls to its newest line, which is right above the text box even while the chat is short
     part("chat", tostring(mp.chat[#mp.chat]), function(root)
@@ -343,7 +425,7 @@ return function(mp, room)
       if not (shown and r) then return end
       local canvas = V.stage()
       -- at the bottom, between the song list and its play button, where the chapter screen has nothing either
-      local hint = "Play a chart to pick it, or tap here to go back"
+      local hint = "Play a chart to add it to the room, or tap here to go back"
       local measure = text(canvas, { 0, 0 }, 26, hint)
       local wide = measure.preferredWidth + 96
       UE.Object.Destroy(measure.gameObject)
@@ -368,6 +450,66 @@ return function(mp, room)
     end
     S.refresh()
   end
+
+  -- the host moves a queued chart by holding it, then dragging: its row follows the finger and the others make room,
+  -- until the finger lifts. the canvas is drawn over the screen, so a row's position is in pixels
+  local function rowAt(x, y)
+    if not (queue and queue.host and V.shown() == "room" and il2cpp.alive(queue.list.transform)) then return end
+    local u = UE.Screen.height / H
+    local view = queue.list.transform.position -- its bottom left corner
+    if y < view.y or y > view.y + queue.list.transform.rect.m_Height * u then return end
+    for i, row in ipairs(queue.rows) do
+      local at = row.t.position -- its top left corner
+      if x > at.x and x < at.x + queue.wide * u and y < at.y and y > at.y - (QUEUED - 8) * u then return i end
+    end
+  end
+
+  -- a finger that moved meanwhile scrolls the list instead
+  local pressed
+  phigrospp.hold(function(x, y)
+    pressed = y
+    return rowAt(x, y) ~= nil
+  end, 0.3, function()
+    for _, finger in ipairs(touches()) do
+      local i = rowAt(finger.x, finger.y)
+      if i and not moving and math.abs(finger.y - pressed) < 12 * UE.Screen.height / H then
+        local shape = queue.rows[i].t:GetComponent(CS.Lean.Gui.LeanPolygon)
+        moving = { i = i, to = i, finger = finger.id, y = finger.y, shape = shape, colour = shape.color }
+        queue.list.transform:GetComponent(UE.UI.ScrollRect).enabled = false -- the list would scroll along
+        queue.rows[i].t:SetAsLastSibling()
+        shape.color = { 1, 1, 1, 0.3 }
+      end
+    end
+  end)
+
+  on("update", function()
+    if not moving then return end
+    local finger
+    for _, each in ipairs(touches()) do
+      if each.id == moving.finger and each.phase ~= 3 and each.phase ~= 4 then finger = each end -- not Ended or Canceled
+    end
+    local rows, drawn = queue and queue.rows, queue and il2cpp.alive(queue.list.transform)
+    if not (finger and drawn) then
+      -- dropped: the room says the new order, which draws the queue again. one drawn again meanwhile is left as it is
+      if drawn then
+        queue.list.transform:GetComponent(UE.UI.ScrollRect).enabled = true
+        if moving.to ~= moving.i then room.send({ t = "move", entry = rows[moving.i].chart.entry, to = moving.to - 1 }) end
+        rows[moving.i].t.anchoredPosition = { 16, -(moving.to - 1) * QUEUED }
+        moving.shape.color = moving.colour
+      end
+      moving = nil
+      return
+    end
+    local down = (moving.i - 1) * QUEUED - (finger.y - moving.y) / (UE.Screen.height / H)
+    down = math.max(0, math.min((#rows - 1) * QUEUED, down))
+    moving.to = math.floor(down / QUEUED + 0.5) + 1
+    for i, row in ipairs(rows) do
+      -- the rows between where it was and where it is step into the place it left
+      local place = i
+      if i > moving.i and i <= moving.to then place = i - 1 elseif i < moving.i and i >= moving.to then place = i + 1 end
+      row.t.anchoredPosition = { 16, i == moving.i and -down or -(place - 1) * QUEUED }
+    end
+  end)
 
   -- what the keyboard put in the box is sent, unless it was closed with back
   local typing

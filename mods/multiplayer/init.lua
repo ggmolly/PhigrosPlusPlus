@@ -1,10 +1,12 @@
--- rooms: players in a room play the chart its host picks at the same time, and see each other's scores. a tab on the
+-- rooms: players in a room play the charts they queue at the same time, each at the level and with the modifiers they
+-- pick, and see each other's scores. a tab on the
 -- chapter screen lists the open rooms of phigros.tools, which carries them over a socket (its server/rooms.ts says
 -- what goes through it) and keeps the matches of the rooms without a password. a play in a room counts like any other.
 -- each play is streamed as it's played: a spectator of the room, or a browser watching it, follows one live
 
 local UE = CS.UnityEngine
 local ui, M = phigrospp.ui, phigrospp.modifiers
+local friends = require("friends")
 local DOMAIN = "phigros.tools rooms v1\0" -- the profile's key signs requests and replays too
 local MENUS = { ChapterSelector = true, SongSelector = true } -- where the room shows
 local LEVELS = { EZ = true, HD = true, IN = true, AT = true }
@@ -22,6 +24,7 @@ local ERRORS = {
   full = { "This room is full", "A room takes 8 players and 8 spectators." },
   kicked = { "The host removed you from this room", "You can't join it again." },
   rooms = { "No room is free", "Too many rooms are open on phigros.tools, try again later." },
+  queue = { "The queue is full", "A room queues 20 charts, 3 of them from each player." },
   elsewhere = { "You joined from another device", "This one left the room." },
 }
 
@@ -34,7 +37,7 @@ local mp = { chat = {} }
 local screen
 local socket, online, unsent, tries = nil, false, {}, 0 -- online: the server knows who this is
 local entering -- the id of the room being joined (it may ask a password), true while one is made
-local checked -- the chart this game last said it has or not
+local checked -- the chart, and the level picked, this game last said it has or not
 local match -- the match being played: { at =, started =, done =, sent = the score last sent, frames = those sent }
 -- the player of the match this spectator watches: { id =, parts = those heard, started = once their play shows }
 local spectating
@@ -117,16 +120,19 @@ function heard.room(m)
     if not entering then hang() end
     return screen.refresh()
   end
-  if not was or was.id ~= room.id then mp.chat, checked, entering = {}, nil, nil end
-  -- each game says whether it has a chart, once
-  local chart = room.chart
-  local key = chart and chart.id .. " " .. chart.level
+  -- a room just entered takes the screen from the friends
+  if not was or was.id ~= room.id then
+    mp.chat, checked, entering = {}, nil, nil
+    friends.close()
+  end
+  -- each game says whether it has a chart at the level its player picked, once
+  local chart, mine = room.chart, seat(room, mp.me.id)
+  local key = chart and chart.entry .. " " .. mine.level
   if key ~= checked then
     checked = key
-    if chart and not phigrospp.unlocked(chart.id, chart.level) then send({ t = "able", able = false }) end
+    if chart then send({ t = "able", able = phigrospp.unlocked(chart.id, mine.level) == true }) end
   end
   -- a game that plays for the room without a match was restarted during it (the server kept its place): it gave up
-  local mine = seat(room, mp.me.id)
   if mine.playing and not match then send({ t = "quit" }) end
   -- the play followed ended once its player doesn't play any more, their last frames came before. one that ended
   -- before any came never shows, the room does again
@@ -148,11 +154,12 @@ function heard.frames(m)
   end
 end
 
+-- everyone plays the room's chart at the level and with the modifiers they picked
 function heard.start(m)
-  local chart = mp.room.chart
+  local mine = seat(mp.room, mp.me.id)
   match, mp.picking = { at = now(), sent = -1, frames = 0 }, false
   screen.refresh()
-  phigrospp.play(chart.id, chart.level, chart.mods, m.seed)
+  phigrospp.play(mp.room.chart.id, mine.level, mine.mods, m.seed)
 end
 
 function heard.chat(m)
@@ -182,8 +189,8 @@ function heard.error(m)
   end)
 end
 
--- the song list's Play picks the room's chart instead of starting it, until the room starts it for everyone. what
--- called it then marks the song list as starting (onStart), which is taken back once it returned
+-- the song list's Play adds the chart to the room's queue instead of starting it, until the room starts it for
+-- everyone. what called it then marks the song list as starting (onStart), which is taken back once it returned
 hook(CS.SongSelector, "GameStart", {
   skip = function(selector, index, level)
     if not mp.room or match or spectating then return false end
@@ -191,16 +198,12 @@ hook(CS.SongSelector, "GameStart", {
     local info = selector.SongItems._items[index].songInfo
     local difficulty = level < #info.levels and info.levels[level]
     mp.picking = false
-    if mp.room.host ~= mp.me.id then
-      screen.refresh()
-      return true
-    end
     if phigrospp.charts.custom(info.songsId) or not LEVELS[difficulty] then
       say({ "This chart can't be played in a room", "Rooms play the game's own EZ, HD, IN and AT charts." })
       mp.picking = true
       return true
     end
-    send({ t = "chart", song = info.songsId, level = difficulty,
+    send({ t = "queue", song = info.songsId, level = difficulty,
       mods = M.fits(info.songsId, difficulty) and M.pick() or 0 })
     screen.refresh()
     return true
@@ -217,7 +220,7 @@ local function ranked()
     local own = p.player.id == mp.me.id
     local live = own and match and not match.done
     if p.playing or p.score > 0 or live then
-      list[#list + 1] = { name = p.player.name, score = live and mine.score or p.score, own = own }
+      list[#list + 1] = { name = p.player.name, score = M.total(live and mine.score or p.score, p.mods), own = own }
     end
   end
   table.sort(list, function(a, b) return a.score > b.score end)
@@ -315,11 +318,13 @@ on("update", function()
 end)
 
 -- shown: whether the room's screen has its place, in a menu while no match is played
-local friends = require("friends")
 screen = require("screen")(mp, { send = send, enter = enter, join = join, follow = follow, seat = seat, friends = friends,
-  shown = function() return MENUS[scene()] and not match and (not spectating or mp.waiting) end })
+  shown = function()
+    return MENUS[scene()] and not match and (not spectating or mp.waiting) and not friends.showing()
+  end })
 
-friends.rooms = screen.open -- the friends' screen goes to the rooms'
+friends.rooms = screen.open -- the friends' screen goes to the rooms', which leave their place while it shows
+on("friends", function() screen.refresh() end)
 
 on("scene", function(name)
   if name == "ChapterSelector" then ui.shortcut("users", screen.open) end
