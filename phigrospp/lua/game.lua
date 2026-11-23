@@ -261,12 +261,16 @@ end
 
 -- puts the song being played at t (seconds into the chart) with its music. going forward the game misses the notes
 -- jumped over, going back the notes from t on come back unjudged. the score stays as it is. given `to`, only the
--- notes from t to there are on the field whichever way it goes, none is missed: a section to practise
-function phigrospp.jump(t, to)
+-- notes from t to there are on the field whichever way it goes, none is missed: a section to practise. given `from`
+-- too, the notes start there instead of at t, for a section that comes after some music
+function phigrospp.jump(t, to, from)
   local progress = stage.progressControl
-  if to or t < progress.nowTime then renote(progress.judgeControl, t, to or math.huge) end
+  if to or t < progress.nowTime then renote(progress.judgeControl, from or t, to or math.huge) end
   local clip = math.max(0, t + progress._offset)
   progress.audioSource:Seek(clip)
+  -- the seek starts the music's clock, which the game reads: while the song is paused or counts down to resume, it's
+  -- stopped until the game schedules the music, or the chart would run ahead of it by that long. a replay has its own
+  if not replaying() and not (progress.isPlaying and progress._playPrepared) then progress.audioSource:Pause() end
   -- audioTime is where the game starts the music again after a pause
   progress.audioTime, progress.nowTime, clock = clip, t, clip
   emit("jump", t)
@@ -312,9 +316,7 @@ function phigrospp.restart()
   local blocks = progress.judgeControl.previewElementUpdateControl
   if blocks.HasBlocks then blocks:DestroyAndCreateAllBlocks() end -- the ones gone by come back
   if not replaying() then
-    -- Play(true) has ProgressControl.Update wait 1.5 s at a first launch, 3 s (the 3, 2, 1) after a pause. the seek
-    -- started the music's clock again, Pause stops it until the music is scheduled
-    progress.audioSource:Pause()
+    -- Play(true) has ProgressControl.Update wait 1.5 s at a first launch, 3 s (the 3, 2, 1) after a pause
     progress._isFirstTimeLaunch = true
     progress:Play(true)
     progress.pauseBar:SetActive(false)
