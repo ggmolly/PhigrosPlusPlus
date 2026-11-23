@@ -42,9 +42,10 @@ end
 local function makeSwitch(w)
   local mirror = selector.mirrorTextSize.transform
   local switch = UE.Object.Instantiate(mirror.gameObject, mirror.parent, false).transform
-  -- the copy came with the switches hanging on Mirror, and goes after the last of them
+  -- the copy came with the switches hanging on Mirror, and goes after the last of them. they go at once: Destroy
+  -- waits for the end of the frame, and the next switch made this frame would hang on one of them
   local extra, last = hanging(switch), mirror
-  if extra then UE.Object.Destroy(extra.gameObject) end
+  if extra then UE.Object.DestroyImmediate(extra.gameObject) end
   while hanging(last) do last = hanging(last) end
   switch.name = "phigrospp-switch"
   switch:SetParent(last, false)
