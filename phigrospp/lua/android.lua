@@ -1,10 +1,8 @@
--- the android side of the platform api (ios.lua has the same functions): toasts, sharing and the screen, through
--- raw jni since unity's java helpers are generic methods the bridge can't call
+-- the android side of the platform api (ios.lua has the same functions): sharing and the screen, through raw jni
+-- since unity's java helpers are generic methods the bridge can't call
 if phigrospp.platform ~= "android" then return end
 
 local UE = CS.UnityEngine
-
-function toast(message) CS.Tools.AndroidAPIs.Toast(tostring(message)) end
 
 local JNI = UE.AndroidJNI
 local function jstring(s) return { l = JNI.NewStringUTF(s) } end

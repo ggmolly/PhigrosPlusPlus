@@ -189,6 +189,27 @@ on("update", function()
   end
 end)
 
+-- a socket of phigros.tools that knows who this is (rooms, friends), carrying json objects named by their t: the
+-- server greets with a nonce, signed with the profile's key after `domain` so the signature is good for nothing else.
+-- heard[t](message) runs for what it says next ("welcome" first), closed() once it ended. send takes a table
+function phigrospp.channel(path, domain, heard, closed)
+  local socket
+  socket = phigrospp.socket(HOST:gsub("^http", "ws", 1) .. path, {
+    open = function() end,
+    message = function(text)
+      local m = phigrospp.json.decode(text)
+      if m.t ~= "hello" then return heard[m.t](m) end
+      local identity = phigrospp.identity
+      socket.send({ t = "auth", key = phigrospp.hex(identity.public()),
+        sig = phigrospp.hex(identity.sign(domain .. m.nonce)) })
+    end,
+    close = closed,
+  })
+  local text = socket.send
+  socket.send = function(message) text(phigrospp.json.encode(message)) end
+  return socket
+end
+
 on("unload", function()
   for _, p in ipairs(pending) do p.request:Dispose() end
   for _, s in ipairs(sockets) do s.ws:Abort() end

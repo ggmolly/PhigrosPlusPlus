@@ -4,7 +4,7 @@
 -- each play is streamed as it's played: a spectator of the room, or a browser watching it, follows one live
 
 local UE = CS.UnityEngine
-local ui, json, M = phigrospp.ui, phigrospp.json, phigrospp.modifiers
+local ui, M = phigrospp.ui, phigrospp.modifiers
 local DOMAIN = "phigros.tools rooms v1\0" -- the profile's key signs requests and replays too
 local MENUS = { ChapterSelector = true, SongSelector = true } -- where the room shows
 local LEVELS = { EZ = true, HD = true, IN = true, AT = true }
@@ -49,7 +49,7 @@ end
 
 -- what waits for the connection goes once the server knows who this is
 local function send(message)
-  if online then return socket.send(json.encode(message)) end
+  if online then return socket.send(message) end
   unsent[#unsent + 1] = message
 end
 
@@ -62,21 +62,14 @@ local heard = {} -- what the server says, by its t
 
 local function connect()
   if socket then return end
-  socket = phigrospp.socket(phigrospp.site:gsub("^http", "ws") .. "/api/room", {
-    open = function() end,
-    message = function(text)
-      local m = json.decode(text)
-      heard[m.t](m)
-    end,
-    -- the server keeps a player's place for a while: the connection is made again, a few times
-    close = function()
-      socket, online, tries = nil, false, tries + 1
-      if mp.room and tries <= TRIES then return after(RETRY, connect) end
-      entering = nil
-      say(UNREACHABLE)
-      heard.room({})
-    end,
-  })
+  -- the server keeps a player's place for a while: the connection is made again, a few times
+  socket = phigrospp.channel("/api/room", DOMAIN, heard, function()
+    socket, online, tries = nil, false, tries + 1
+    if mp.room and tries <= TRIES then return after(RETRY, connect) end
+    entering = nil
+    say(UNREACHABLE)
+    heard.room({})
+  end)
 end
 
 -- makes or joins a room, which takes a profile
@@ -88,12 +81,6 @@ local function enter(message)
 end
 
 local function join(id, password) enter({ t = "join", room = id, password = password or "" }) end
-
-function heard.hello(m)
-  local identity = phigrospp.identity
-  socket.send(json.encode({ t = "auth", key = phigrospp.hex(identity.public()),
-    sig = phigrospp.hex(identity.sign(DOMAIN .. m.nonce)) }))
-end
 
 function heard.welcome(m)
   mp.me, online, tries = m.player, true, 0
@@ -123,6 +110,7 @@ end
 function heard.room(m)
   local room, was = m.room, mp.room
   mp.room = room
+  phigrospp.emit("room", room)
   if not room then
     if spectating then follow(nil) end
     mp.chat, mp.picking, checked, match = {}, false, nil, nil
@@ -327,8 +315,11 @@ on("update", function()
 end)
 
 -- shown: whether the room's screen has its place, in a menu while no match is played
-screen = require("screen")(mp, { send = send, enter = enter, join = join, follow = follow, seat = seat,
+local friends = require("friends")
+screen = require("screen")(mp, { send = send, enter = enter, join = join, follow = follow, seat = seat, friends = friends,
   shown = function() return MENUS[scene()] and not match and (not spectating or mp.waiting) end })
+
+friends.rooms = screen.open -- the friends' screen goes to the rooms'
 
 on("scene", function(name)
   if name == "ChapterSelector" then ui.shortcut("users", screen.open) end

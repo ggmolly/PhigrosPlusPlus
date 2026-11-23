@@ -6,100 +6,26 @@ local UE = CS.UnityEngine
 local kit, M = phigrospp.ui, phigrospp.modifiers
 local chooser = require("modifiers")
 local SLOPE = CS.SettingItemsManager.InverseSlope -- the game's slant: sideways per unit of height
-local H = 1080 -- the screen's height in the canvas's units
-local LEFT, TOP = 60, H - 66 -- where the columns start, and the middle of the top bar
 local ROW, STEP = 68, 78 -- a player's row, and from a row to the next
 local LINES, LINE = 3, 36 -- the chat lines shown, and their height
 local BUTTON, GAP = 210, 16 -- the buttons at the bottom right: the host has three
 local REFRESH = 4 -- seconds between two reads of the open rooms
 local NAMING = "Name it in 24 characters at most, or leave it empty to name it after you."
-local WHITE, DIM, FAINT, DARK = { 1, 1, 1, 1 }, { 1, 1, 1, 0.5 }, { 1, 1, 1, 0.08 }, { 0.02, 0.13, 0.17, 1 }
-local GOLD, GREEN, RED = { 1, 0.82, 0.3, 1 }, { 0.6, 0.92, 0.55, 1 }, { 1, 0.5, 0.5, 1 }
+local C = kit.colours
+local WHITE, DIM, FAINT, DARK, GOLD, GREEN, RED = C.white, C.dim, C.faint, C.dark, C.gold, C.green, C.red
 local LEVEL = { EZ = { 0.29, 0.66, 0.29, 1 }, HD = { 0.23, 0.47, 0.75, 1 }, IN = { 0.77, 0.23, 0.2, 1 },
   AT = { 0.29, 0.29, 0.32, 1 } }
 
--- mp is the mod's state (init.lua), room what it can do: send, enter, join, follow, seat, and shown
+-- mp is the mod's state (init.lua), room what it can do: send, enter, join, follow, seat, shown, and the friends mod
 return function(mp, room)
   local S = {}
-  local canvas, width, font -- the canvas over the menu, as wide as the screen in its units
-  local panel, parts -- the view shown ("list" or "room"), and its parts by name: { key =, root = }
+  local V = kit.view("phigrospp-room") -- the canvas over the menu, with the list's panel or the room's
+  local H, LEFT, TOP = V.height, V.left, V.top
+  local text, icon, tappable, plate, action, back, part = V.text, V.icon, V.tappable, V.plate, V.action, V.back, V.part
   local pill -- the host's way back to the room while picking a chart
   local field -- the chat's text box
   local listing, rooms, polling -- the list is open, the rooms it shows (false when they can't be read), its timer
   local states -- each player's text on the right of their row, by id
-
-  -- a text from the middle of its left side. given a width, it's cut where it ends
-  local function text(parent, pos, size, value, colour, alignment, pivot, box)
-    local t = kit.text(parent, "phigrospp-room-text", font, pos, { box or 0, box and size * 1.5 or 0 }, size, alignment or 3, pivot)
-    t.text, t.color, t.supportRichText = value, colour or WHITE, false
-    if box then t.horizontalOverflow, t.verticalOverflow = 0, 0 end -- Wrap, Truncate
-    return t
-  end
-
-  local function icon(parent, pos, size, name, colour)
-    local image = kit.rect(parent, "phigrospp-room-icon", pos, { size, size }, colour or WHITE)
-    image.sprite = kit.icon(name)
-    return image
-  end
-
-  local function tappable(shape, fn)
-    shape.raycastTarget = true
-    phigrospp.click(shape.gameObject:AddComponent(UE.UI.Button), fn)
-  end
-
-  -- a slanted bar from its top left corner with a text in its middle, which is left of its box's: its bottom leans
-  local function plate(parent, pos, size, colour, fontSize, label, ink)
-    local shape = kit.bar(parent, "phigrospp-room-plate", pos, size, colour)
-    text(shape.transform, { (size[1] - size[2] * SLOPE) / 2, size[2] / 2 }, fontSize, label, ink, 4, { 0.5, 0.5 }) -- MiddleCenter
-    return shape
-  end
-
-  -- a button, lit in a colour when given one. without fn it's only a label
-  local function action(parent, pos, size, label, fn, lit)
-    local shape = plate(parent, pos, { size, 76 }, lit or FAINT, 32, label, lit and DARK or fn and WHITE or DIM)
-    if fn then tappable(shape, fn) end
-    return shape
-  end
-
-  -- the back arrow of the top bar, in a square easier to tap than itself
-  local function back(root, fn)
-    tappable(kit.rect(root, "phigrospp-room-back", { 20, TOP }, { 130, 110 }, { 0, 0, 0, 0 }), fn)
-    icon(root, { LEFT, TOP }, 56, "arrow-left")
-  end
-
-  -- a part of the panel, drawn again only when what it shows (its key) changed: scores come every second
-  local function part(name, key, draw)
-    local p = parts[name]
-    if p and p.key == key then return end
-    if p then UE.Object.Destroy(p.root.gameObject) end
-    local root = UE.GameObject("phigrospp-room-" .. name):AddComponent(UE.RectTransform)
-    root:SetParent(panel.transform, false)
-    root.anchorMin, root.anchorMax, root.sizeDelta = { 0, 0 }, { 0, 0 }, { 0, 0 } -- the panel's bottom left corner
-    parts[name] = { key = key, root = root }
-    draw(root)
-  end
-
-  local function hide()
-    if panel and il2cpp.alive(panel.transform) then panel.close() end
-    panel, field = nil, nil
-  end
-
-  -- the canvas, made again in each scene, with the font of a text of that scene
-  local function stage()
-    if il2cpp.alive(canvas) then return end
-    canvas, width = kit.screen("phigrospp-rooms", 32000)
-    local chapters = UE.Object.FindObjectOfType(CS.ChapterSelector)
-    font = chapters and chapters.nowLevel.font or UE.Object.FindObjectOfType(CS.SongSelector).songName.font
-  end
-
-  -- the panel of a view, made when it isn't the one shown: another view's slides out
-  local function show(view)
-    if panel and (panel.view ~= view or not il2cpp.alive(panel.transform)) then hide() end
-    if panel then return end
-    stage()
-    panel = kit.panel(canvas, "phigrospp-room", nil, 0.93)
-    panel.view, parts = view, {}
-  end
 
   -- the open rooms ---------------------------------------------------------------------------------------------------
 
@@ -127,12 +53,17 @@ return function(mp, room)
   end
 
   local function drawList()
+    local width = V.width
     part("top", "", function(root)
       back(root, function()
         closeList()
         S.refresh()
       end)
-      text(root, { 220, TOP }, 56, "Rooms")
+      V.titles(root, { "Rooms", "Friends" }, "Rooms", function()
+        closeList()
+        S.refresh()
+        room.friends.open()
+      end)
       action(root, { width - 400, TOP + 38 }, 340, "Create a room", create)
     end)
     part("rooms", rooms and rooms.body or tostring(rooms), function(root)
@@ -174,17 +105,40 @@ return function(mp, room)
     if ok then room.send({ t = "rename", name = name }) end
   end
 
-  -- the host hands the room to a player or removes them
+  -- a player's row: anyone asks them to be their friend, the host hands them the room or removes them
   local function manage(player)
-    local function choice(name, label, colour, t)
-      return { icon = kit.icon(name), label = label, colour = colour, tap = function() kit.close(t) end,
-        on = function() return false end, note = function() return "" end }
+    local choices, state = {}, room.friends.state(player.id)
+    if state ~= "friend" and state ~= "outgoing" then
+      choices[1] = { icon = "user-plus", label = state and "Accept friend" or "Add friend", colour = GREEN, value = "friend" }
     end
-    local t = kit.confirm({ title = ("%s#%04d"):format(player.name, player.number), yes = false,
-      grid = { columns = 2, height = 190, cells = {
-        choice("crown", "Make host", GOLD, "host"),
-        choice("x", "Remove", RED, "kick") } } })
+    if mp.room.host == mp.me.id then
+      choices[#choices + 1] = { icon = "crown", label = "Make host", colour = GOLD, value = "host" }
+      choices[#choices + 1] = { icon = "x", label = "Remove", colour = RED, value = "kick" }
+    end
+    if #choices == 0 then return end
+    local t = kit.choose(("%s#%04d"):format(player.name, player.number), choices)
+    if t == "friend" then return room.friends.add(player.id) end
     if t then room.send({ t = t, player = player.id }) end
+  end
+
+  -- the friends who are online and not in the room yet, to tap one into it: they get a toast that joins it
+  local function invite()
+    local cells, invited = {}, {}
+    for _, f in ipairs(room.friends.online()) do
+      local id = f.player.id
+      if not room.seat(mp.room, id) then
+        cells[#cells + 1] = { icon = kit.icon("users"), label = f.player.name, colour = GREEN,
+          on = function() return invited[id] end, note = function() return invited[id] and "Invited" or "" end,
+          tap = function()
+            invited[id] = true
+            room.friends.invite(id)
+          end }
+      end
+    end
+    kit.confirm({ title = "Invite friends", yes = false, no = "Done",
+      message = #cells > 0 and "Tap a friend to invite them to this room."
+        or "No friend of yours is online outside this room. Friends are added from the rooms' Friends.",
+      grid = #cells > 0 and { columns = 4, height = 190, cells = cells } or nil })
   end
 
   -- the host's modifiers become the room's
@@ -205,12 +159,12 @@ return function(mp, room)
     field.text = ""
   end
 
-  -- a spectator watches a player of the match, the host removes one otherwise
+  -- a spectator watches a player of the match, anyone manages one otherwise
   local function tapped(player)
     local r = mp.room
     local me, p = room.seat(r, mp.me.id), room.seat(r, player.id)
     if not r.playing or not me.watching then
-      if r.host == mp.me.id then manage(player) end
+      manage(player)
     elseif p and p.playing and me.able then
       room.follow(p)
     end
@@ -228,14 +182,13 @@ return function(mp, room)
   end
 
   local function drawRoom(r)
+    local width = V.width
     local me, column = room.seat(r, mp.me.id), math.min(860, width * 0.5)
     local host = r.host == mp.me.id
 
     part("top", r.id, function(root)
       back(root, leave)
-      action(root, { width - 320, TOP + 38 }, 260, "Invite", function()
-        phigrospp.share(("%s/rooms/%s"):format(phigrospp.site, r.id))
-      end)
+      action(root, { width - 320, TOP + 38 }, 260, "Invite", invite)
       -- the chat's text box stays as it is while the rest is drawn again. it ends before the host's buttons
       local box = math.min(column - 84, width - 3 * (BUTTON + GAP) - 2 * LEFT - 112)
       local area = kit.rect(root, "phigrospp-room-input", { LEFT, 120 }, { box, 60 }, { 1, 1, 1, 0.1 })
@@ -369,7 +322,7 @@ return function(mp, room)
   local function drawWaiting(player)
     part("top", player.id, function(root)
       back(root, function() room.follow(nil) end)
-      text(root, { width / 2, H / 2 }, 56, ("Waiting for %s's play..."):format(player.name), WHITE, 4, { 0.5, 0.5 })
+      text(root, { V.width / 2, H / 2 }, 56, ("Waiting for %s's play..."):format(player.name), WHITE, 4, { 0.5, 0.5 })
     end)
   end
 
@@ -386,22 +339,22 @@ return function(mp, room)
     if selector then selector.enabled = view == nil end
     if il2cpp.alive(pill) then UE.Object.Destroy(pill.gameObject) end
     if not view then
-      hide()
+      V.hide()
       if not (shown and r) then return end
-      stage()
+      local canvas = V.stage()
       -- at the bottom, between the song list and its play button, where the chapter screen has nothing either
       local hint = "Play a chart to pick it, or tap here to go back"
       local measure = text(canvas, { 0, 0 }, 26, hint)
       local wide = measure.preferredWidth + 96
       UE.Object.Destroy(measure.gameObject)
-      pill = plate(canvas, { width * 0.525 - wide / 2, 112 }, { wide, 70 }, GOLD, 26, hint, DARK)
+      pill = plate(canvas, { V.width * 0.525 - wide / 2, 112 }, { wide, 70 }, GOLD, 26, hint, DARK)
       tappable(pill, function()
         mp.picking = false
         S.refresh()
       end)
       return
     end
-    show(view)
+    V.show(view)
     if view == "list" then drawList() elseif view == "waiting" then drawWaiting(mp.waiting) else drawRoom(r) end
   end
 

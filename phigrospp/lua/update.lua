@@ -1,4 +1,4 @@
--- updates from github releases, offered in a popup on the chapter screen (see the wiki's Updates page). a release's
+-- updates from github releases, offered in a toast on the chapter screen (see the wiki's Updates page). a release's
 -- phigrospp.version is its bundle's first line, with each platform's games as "android:4.0.1.2", the newest last
 
 local ui = phigrospp.ui
@@ -8,9 +8,9 @@ local INSTALLER = phigrospp.platform == "ios" and "https://github.com/ggmolly/Ph
   or "https://github.com/ggmolly/PhigrosPlusPlus-Installer/releases/latest"
 local SKIPPED = phigrospp.root .. "/skipped" -- the last version the player skipped
 
--- the version offered, the game of its app when it needs a newer app, and whether its popup waits for the chapter
--- screen
-local latest, game, prompt
+-- the version offered, the game of its app when it needs a newer app, whether its toast waits for the chapter
+-- screen, and what dismisses that toast
+local latest, game, prompt, dismiss
 
 -- as bundle.c compares them: a beta ("1.2.3-beta.4") comes before its release
 local function number(version)
@@ -58,7 +58,6 @@ end
 
 -- the popup offering the latest version, from a coroutine
 local function offer()
-  prompt = nil
   if game then
     local ios = phigrospp.platform == "ios"
     if ui.confirm({ title = "Phigros++ " .. latest, no = "Skip", yes = ios and "Open the release" or "Open the installer",
@@ -79,8 +78,16 @@ end
 
 link(function() return ("Update to Phigros++ %s"):format(latest) end, offer, nil, function() return latest ~= nil end)
 
+-- nothing waits on the player: the toast opens the popup when tapped, and goes with the chapter screen
+local function announce()
+  prompt = nil
+  dismiss = toast(("Phigros++ %s is out, tap to update"):format(latest), { seconds = 10, tap = offer })
+end
+
 on("scene", function(name)
-  if prompt and name == "ChapterSelector" then coroutine.wrap(offer)() end
+  if dismiss then dismiss() end
+  dismiss = nil
+  if prompt and name == "ChapterSelector" then announce() end
 end)
 
 phigrospp.fetch("GET", DOWNLOAD .. "phigrospp.version", nil, function(status, line)
@@ -101,5 +108,5 @@ phigrospp.fetch("GET", DOWNLOAD .. "phigrospp.version", nil, function(status, li
     return
   end
   if skipped() == latest then return end
-  if scene() == "ChapterSelector" then coroutine.wrap(offer)() else prompt = true end
+  if scene() == "ChapterSelector" then announce() else prompt = true end
 end)

@@ -106,20 +106,13 @@ local function open()
 
   local middle = height - 66 -- of the tabs at the top
   kit.text(root, "phigrospp-leaderboard-title", font, { 220, middle }, { 0, 0 }, 56, 3, { 0, 0.5 }).text = "Leaderboard"
-  local label = kit.text(root, "phigrospp-leaderboard-verified", font, { width - 64, middle }, { 0, 0 }, 40, 5, { 1, 0.5 })
-  label.text = "Verified only"
-  local box = kit.rect(root, "phigrospp-leaderboard-box", { width - 84 - label.preferredWidth, middle }, { 48, 48 }, WHITE,
-    { 1, 0.5 })
-  local function tick() box.sprite = kit.icon(verified and "square-check" or "square") end
-  tick()
-  local toggle = kit.rect(root, "phigrospp-leaderboard-toggle", { width - 32, middle }, { label.preferredWidth + 136, 112 },
-    { 0, 0, 0, 0 }, { 1, 0.5 })
-  toggle.raycastTarget = true
-  phigrospp.click(toggle.gameObject:AddComponent(UE.UI.Button), function()
-    verified = not verified
-    tick()
-    restart(s)
-  end)
+  local tick
+  tick = kit.checkbox(root, "phigrospp-leaderboard-verified", font, { width - 64, middle }, 40, "Verified only", verified,
+    function()
+      verified = not verified
+      tick(verified)
+      restart(s)
+    end)
 
   s.list = kit.list(root, "phigrospp-leaderboard-list", { 0, 30 }, { width, middle - 114 }, math.floor(width * 0.6))
   s.message = kit.text(root, "phigrospp-leaderboard-message", font, { width / 2, height / 2 }, { 0, 0 }, 44, 4,

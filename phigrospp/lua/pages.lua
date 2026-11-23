@@ -277,7 +277,7 @@ local function touchList(p, dt)
   for i = 0, Input.touchCount - 1 do
     local touch = Input.GetTouch(i)
     local x, y, phase = touch.m_Position.x, touch.m_Position.y, touch.m_Phase
-    if phase == 0 and x < Screen.width * 0.45 and not l.finger then -- Began
+    if phase == 0 and x < Screen.width * 0.45 and not l.finger and not kit.toasted(x, y) then -- Began
       l.finger, l.y0, l.value0, l.moved, resting = touch.m_FingerId, y, l.value, false, false
     elseif touch.m_FingerId == l.finger then
       local dy = (y - l.y0) / scale
