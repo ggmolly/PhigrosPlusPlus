@@ -53,7 +53,10 @@ every(1, function()
   local chunk, why = load("return " .. source, "=eval", "t")
   if not chunk then chunk, why = load(source, "=eval", "t") end
   local result = chunk and table.pack(xpcall(chunk, traceback)) or { n = 2, false, why }
-  for i = 2, result.n do print(dump(result[i])) end
+  -- a line at a time: android cuts a log line at about 4 KB
+  for i = 2, result.n do
+    for line in dump(result[i]):gmatch("[^\n]+") do print(line) end
+  end
   print("eval done")
 end)
 

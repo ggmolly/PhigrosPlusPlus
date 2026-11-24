@@ -1,6 +1,6 @@
 // usage: api.ts [page], renders the wiki's Mod API page from api.lua: `-- # Title` lines are its headings, --[=[md blocks
-// are copied, each function, value and class gets its signature, description and the params or fields that say
-// something (after a #). also tells the .luacheckrc globals api.lua doesn't declare
+// are copied, each function, value and class gets its signature, description, a table of its params or fields and
+// what it returns. also tells the .luacheckrc globals api.lua doesn't declare
 import { readFileSync, writeFileSync } from "node:fs";
 
 const mod = `${import.meta.dirname}/..`;
@@ -23,8 +23,19 @@ function names(list: string) {
   return parts.filter(Boolean).join(", ");
 }
 
+// a return is "type", or "type name" when it ends with a name its type doesn't need: "fun() cancel", not "fun(): T"
+function returned(spec: string) {
+  const m = spec.match(/^(.*\S)\s+([A-Za-z_]\w*)$/);
+  const balanced = (t: string) => [..."({<"].every((c, i) => t.split(c).length === t.split(")}>"[i]!).length);
+  return m && !m[1]!.endsWith(":") && balanced(m[1]!) ? { type: m[1]!, name: m[2]! } : { type: spec, name: "" };
+}
+
+// a table cell's code: its | escaped, or the table would take it for a new cell
+const code = (text: string) => `\`${text.replaceAll("|", "\\|")}\``;
+
 const out = ["# Mod API", ""];
-let text: string[] = [], items: string[] = [], signatures: string[] = [], optional = new Set<string>(), type = "";
+let text: string[] = [], rows: string[][] = [], returns: string[] = [], signatures: string[] = [];
+let optional = new Set<string>(), type = "", head = "Parameter";
 
 function flush(name: string, args?: string) {
   if (args !== undefined) {
@@ -32,13 +43,15 @@ function flush(name: string, args?: string) {
     signatures.unshift(own);
   }
   const heads = [...new Set(signatures.length ? signatures : [name])];
-  if (text.length || items.length || args !== undefined || type) {
+  if (text.length || rows.length || args !== undefined || type) {
     out.push(`### ${heads.map((h) => `\`${h}\``).join(" ")}`, "");
     if (type) out.push(`\`${type}\``, "");
     if (text.length) out.push(...text, "");
-    if (items.length) out.push(...items, "");
+    if (rows.length)
+      out.push(`| ${head} | Type | |`, "|---|---|---|", ...rows.map((row) => `| ${row.join(" | ")} |`), "");
+    for (const line of returns) out.push(line, "");
   }
-  text = [], items = [], signatures = [], optional = new Set(), type = "";
+  text = [], rows = [], returns = [], signatures = [], optional = new Set(), type = "", head = "Parameter";
 }
 
 let md = false, cls = "";
@@ -51,14 +64,14 @@ for (const line of source.split("\n")) {
   let m;
   if (line === "--[=[md") md = true;
   else if ((m = line.match(/^-- # (.*)/))) out.push(`## ${m[1]}`, "");
-  else if ((m = line.match(/^---@class (\S+)/))) cls = m[1];
-  else if ((m = line.match(/^---@(param|field|return) (.*?)(?: # (.*))?$/))) {
-    const [, tag, spec, description] = m;
-    if (tag === "param" && spec.split(" ")[0].endsWith("?")) optional.add(spec.split(" ")[0].slice(0, -1));
-    // a param or field is "name type", a return "type name"
-    const [first, ...rest] = spec.split(" ");
-    const [name, kind] = tag === "return" ? ["returns", first] : [`\`${first}\``, rest.join(" ")];
-    if (description || tag === "field") items.push(`- ${name} \`${kind}\`${description ? `: ${description}` : ""}`);
+  else if ((m = line.match(/^---@class (\S+)/))) (cls = m[1]), (head = "Field");
+  else if ((m = line.match(/^---@return (.*?)(?: # (.*))?$/))) {
+    const { type: kind, name } = returned(m[1]);
+    returns.push(`Returns ${code(kind)}${name ? ` (${name})` : ""}${m[2] ? `: ${m[2]}` : ""}`);
+  } else if ((m = line.match(/^---@(param|field) (\S+) (.*?)(?: # (.*))?$/))) {
+    const [, tag, name, kind, description = ""] = m;
+    if (tag === "param" && name.endsWith("?")) optional.add(name.slice(0, -1));
+    rows.push([`\`${name}\``, code(kind), description]);
   } else if ((m = line.match(/^---@overload fun\((.*)\)/))) {
     const call = m[1].replace(/\):.*$/, "");
     signatures.push(`NAME(${names(call)})`);
@@ -73,7 +86,7 @@ for (const line of source.split("\n")) {
     flush(cls);
     cls = "";
   } else if ((m = line.match(/^([\w.]+) = /)) && (text.length || type)) flush(m[1]);
-  else text = [], items = [], type = "";
+  else (text = []), (rows = []), (returns = []), (type = ""), (head = "Parameter");
 }
 writeFileSync(page, out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n");
 
