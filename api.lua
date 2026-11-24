@@ -357,7 +357,7 @@ function View.part(name, key, draw) end
 ---@param colour? Colour
 ---@param alignment? integer # a TextAnchor, MiddleLeft when left out
 ---@param pivot? Vector
----@param box? number # a width: the text is cut where it ends
+---@param box? number # a width: what goes past it is cut and ends with "..."
 ---@return Unity
 function View.text(parent, pos, size, text, colour, alignment, pivot, box) end
 
@@ -498,7 +498,8 @@ function ui.choose(title, choices) end
 ---@return Unity
 function ui.bar(parent, name, pos, size, colour) end
 
----A song's illustration cut to fill such a bar, what's put in it is cut to its shape too. A few songs have one per
+---A song's illustration cut to fill such a bar, what's put in it is cut to its shape too. It's the level's own when
+---the level has one. A few songs have one per
 ---level: given a level, it's that level's.
 ---@param parent Unity
 ---@param name string
@@ -868,7 +869,8 @@ function phigrospp.modifiers.strip(parent, mods, pos, width) end
 ---@field name string
 ---@field composer string
 ---@field illustrator string
----@field charts table<Difficulty, { constant: number, charter: string }>
+---@field charts table<Difficulty, { constant: number, charter: string, cover: boolean }> # cover: the level has its own illustration
+---@field cover Difficulty? # the level whose illustration stands for the song, when each level has its own
 
 ---@class Record
 ---@field id string
