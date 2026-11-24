@@ -47,5 +47,5 @@ node -e '
 ' "$MOD/registry.txt" "$MOD/build/registry.txt"
 [ "${1:-}" = --local ] && exit
 rsync -az "$MOD/build/registry.txt" "$MOD/build/registry.txt.sig" "$SERVER"
-# the worker rebuilds the catalog's index.json when it starts, then every 15 minutes (web/server/worker.ts)
-ssh illustrious 'cd containers/phigros-tools && docker compose restart worker' >/dev/null
+# the worker rebuilds the catalog's index.json every 15 minutes, and at once when asked (web/server/worker.ts)
+curl -fsS -X POST https://phigros.tools/api/catalog
