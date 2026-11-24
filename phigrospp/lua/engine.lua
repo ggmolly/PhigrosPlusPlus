@@ -29,6 +29,34 @@ local function runTimers()
   end
 end
 
+-- phigros++/eval.lua (what `mod.mjs eval` sends) runs once in the live state and is removed: an expression's value or
+-- a chunk's returns are printed, one level deep for tables, then "eval done" for the script to stop reading the log
+local EVAL = phigrospp.root .. "/eval.lua"
+
+local function dump(value)
+  if type(value) ~= "table" then return tostring(value) end
+  local lines = {}
+  for k, v in pairs(value) do lines[#lines + 1] = #value > 0 and tostring(v) or ("%s = %s"):format(tostring(k), tostring(v)) end
+  if #value == 0 then table.sort(lines) end
+  return table.concat(lines, "\n")
+end
+
+-- the traceback stops where the eval's chunk was called from, the core's frames under it say nothing
+local function traceback(err) return (debug.traceback(err, 2):gsub("\n%s*%[C%]: in function 'xpcall'.*", "")) end
+
+every(1, function()
+  local file = io.open(EVAL, "rb")
+  if not file then return end
+  local source = file:read("a")
+  file:close()
+  os.remove(EVAL)
+  local chunk, why = load("return " .. source, "=eval", "t")
+  if not chunk then chunk, why = load(source, "=eval", "t") end
+  local result = chunk and table.pack(xpcall(chunk, traceback)) or { n = 2, false, why }
+  for i = 2, result.n do print(dump(result[i])) end
+  print("eval done")
+end)
+
 -- scenes are told apart by handle, their name is the file name of their path
 local handle, current
 

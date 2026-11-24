@@ -15,7 +15,7 @@ SOURCES := $(wildcard phigrospp/* phigrospp/lua/* mods/* mods/*/* vendor/lua/* v
 # every target talks to the same device or files, one at a time
 .NOTPARALLEL:
 
-.PHONY: all lib apk ios ipa ios-logs verify install install-full push push-core reset start stop restart logs profile dev release publish clean
+.PHONY: all lib apk ios ipa ios-logs verify install install-full push push-core reset start stop restart logs profile dev release publish api clean
 
 all: apk
 
@@ -94,7 +94,11 @@ release: $(LIB) $(IOS)
 # (github.com/ggmolly/PhigrosPlusPlus-Installer) and patches the game with this one
 publish: release
 	gh release create v$$(cat phigrospp/VERSION) out/phigrospp.bundle out/phigrospp.version out/phigrospp.installer \
-		out/libphigrospp.so out/phigrospp.ios --title "Phigros++ $$(cat phigrospp/VERSION)" --generate-notes --latest
+		out/libphigrospp.so out/phigrospp.ios api.lua --title "Phigros++ $$(cat phigrospp/VERSION)" --generate-notes --latest
+
+# the wiki's Mod API page, from api.lua (which a release carries for mod authors' editors)
+api:
+	node scripts/api.ts
 
 dev: install push
 	adb logcat -c

@@ -1,6 +1,6 @@
 # the mods of the Phigros++ catalog, see the wiki's Publishing a mod page. to list yours, open a pull request adding
 # your key once and a line per mod, all in lowercase:
-#   <github owner>:<ed25519 public key in hex, from scripts/sign-mod.mjs --keygen>
+#   <github owner>:<ed25519 public key in hex, from scripts/mod.mjs keygen>
 #   <github owner>/<repo>
 
 ggmolly:c8d37a10fa43af3ef5c0233bed30ceb48c8f718753dc4a0e033581dc5f9deffa
