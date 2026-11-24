@@ -286,15 +286,18 @@ phigrospp.ui = {
     shape:SetVerticesDirty()
     return shape
   end,
-  -- a song's illustration (the game's small one) cut to fill a bar slanted and placed like kit.bar's
-  cover = function(parent, name, pos, size, id)
+  -- a song's illustration (the game's small one) cut to fill a bar slanted and placed like kit.bar's, the level's own
+  -- when it has one
+  cover = function(parent, name, pos, size, id, level)
+    local s = song(id)
+    level = level and s.charts[level].cover and level or s.cover or ""
     local shape = phigrospp.ui.bar(parent, name, pos, size, { 1, 1, 1, 1 })
     shape.gameObject:AddComponent(UE.UI.Mask)
     local lean = size[2] * CS.SettingItemsManager.InverseSlope
     local wide = math.max(size[1] + lean, size[2] * COVER)
     local art = phigrospp.ui.place(shape.transform, name .. "-art", UE.UI.Image, { (size[1] - lean) / 2, size[2] / 2 },
       { wide, wide / COVER }, { 0.5, 0.5 })
-    art.gameObject:AddComponent(CS.AddressableImageLoader).Code = CS.IdBuilder.BuildLowResImageId(id, "")
+    art.gameObject:AddComponent(CS.AddressableImageLoader).Code = CS.IdBuilder.BuildLowResImageId(id, level)
     return shape
   end,
   -- a screen over a canvas, sliding in over a shade that catches the taps: { transform =, close = }. closed() runs

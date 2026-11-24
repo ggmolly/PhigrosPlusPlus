@@ -61,11 +61,18 @@ function kit.view(name)
   local V = { height = 1080, left = 60, top = 1080 - 66 } -- where the columns start, and the middle of the top bar
   local canvas, font, panel, parts
 
-  -- a text from the middle of its left side. given a width (box), it's cut where it ends
+  -- a text from the middle of its left side. given a width (box), what goes past it is cut and ends with "..."
   function V.text(parent, pos, size, value, colour, alignment, pivot, box)
     local t = kit.text(parent, name .. "-text", font, pos, { box or 0, box and size * 1.5 or 0 }, size, alignment or 3, pivot)
     t.text, t.color, t.supportRichText = value, colour or WHITE, false
-    if box then t.horizontalOverflow, t.verticalOverflow = 0, 0 end -- Wrap, Truncate
+    if box then
+      t.horizontalOverflow, t.verticalOverflow = 0, 0 -- Wrap, Truncate
+      -- preferredWidth is the text's width on one line, whatever the box
+      while t.preferredWidth > box and #value > 0 do
+        value = value:sub(1, utf8.offset(value, -1) - 1)
+        t.text = value:gsub("%s+$", "") .. "..."
+      end
+    end
     return t
   end
 

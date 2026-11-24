@@ -37,10 +37,16 @@ function songs()
   local all = CS.GameInformation.main.song.AllSongsBypassLimited
   for i = 0, all._size - 1 do
     local s = all._items[i]
-    local charts = {}
-    for j = 0, #s.levels - 1 do charts[s.levels[j]] = { constant = math.floor(s.difficulty[j] * 10 + 0.5) / 10, charter = s.charter[j] } end
+    local charts, cover = {}
+    for j = 0, #s.levels - 1 do
+      local level = s.levels[j]
+      local own = s.hasDifferentCover and s.differentCover & s:CastDifficulty(level) ~= 0
+      charts[level] = { constant = math.floor(s.difficulty[j] * 10 + 0.5) / 10, charter = s.charter[j], cover = own }
+      cover = cover or own and level
+    end
+    -- cover is the level whose illustration stands for the song when each level has its own
     catalog[i + 1] = { id = s.songsId, name = s.songsName, composer = s.composer, illustrator = s.illustrator,
-      charts = charts }
+      charts = charts, cover = cover }
     byId[s.songsId] = catalog[i + 1]
   end
   return catalog
