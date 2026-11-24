@@ -174,6 +174,7 @@ end
 local panels, lists, videos = {}, {}, {}
 local SLIDE = 0.35 -- seconds a panel takes to come and go
 local SCROLLBAR = 4 -- an upright list's scroll bar, wide
+local COVER = 2048 / 1080 -- how wide the game's illustrations are for their height
 
 -- calls each(item) for the ones whose object lives, an item whose object died with its scene or each() says is done
 -- (true) is forgotten
@@ -283,6 +284,17 @@ phigrospp.ui = {
     end
     shape.Blur, shape.color = 0.5, colour
     shape:SetVerticesDirty()
+    return shape
+  end,
+  -- a song's illustration (the game's small one) cut to fill a bar slanted and placed like kit.bar's
+  cover = function(parent, name, pos, size, id)
+    local shape = phigrospp.ui.bar(parent, name, pos, size, { 1, 1, 1, 1 })
+    shape.gameObject:AddComponent(UE.UI.Mask)
+    local lean = size[2] * CS.SettingItemsManager.InverseSlope
+    local wide = math.max(size[1] + lean, size[2] * COVER)
+    local art = phigrospp.ui.place(shape.transform, name .. "-art", UE.UI.Image, { (size[1] - lean) / 2, size[2] / 2 },
+      { wide, wide / COVER }, { 0.5, 0.5 })
+    art.gameObject:AddComponent(CS.AddressableImageLoader).Code = CS.IdBuilder.BuildLowResImageId(id, "")
     return shape
   end,
   -- a screen over a canvas, sliding in over a shade that catches the taps: { transform =, close = }. closed() runs

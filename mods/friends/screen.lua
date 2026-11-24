@@ -2,7 +2,6 @@
 -- its top bar goes to the rooms and adds a friend, the bottom right says how the player shows to them (invisible or
 -- not, their plays watched or not)
 
-local UE = CS.UnityEngine
 local kit = phigrospp.ui
 local SLOPE = CS.SettingItemsManager.InverseSlope -- the game's slant: sideways per unit of height
 local ROW, STEP = 88, 104 -- a friend's row, and from a row to the next
@@ -16,7 +15,6 @@ return function(F)
   local TOP = V.top
   local text, action, part = V.text, V.action, V.part
   local open -- whether the player opened it
-  local selector -- the song list turned off under it
 
   local function add()
     local ok, typed = kit.confirm({ title = "Add a friend", input = "Name#0042", yes = "Add",
@@ -116,8 +114,6 @@ return function(F)
     open = true
     phigrospp.emit("friends")
     F.wake()
-    -- the song list reads the touches itself: it's off under the screen, unless a page turned it off already
-    selector = scene() == "SongSelector" and not kit.paging() and UE.Object.FindObjectOfType(CS.SongSelector) or nil
     S.refresh()
   end
 
@@ -125,14 +121,8 @@ return function(F)
     if not open then return end
     open = false
     phigrospp.emit("friends")
-    if il2cpp.alive(selector) then selector.enabled = true end
     S.refresh()
   end
-
-  -- the rooms turn the song list back on when theirs changes
-  on("update", function()
-    if open and il2cpp.alive(selector) then selector.enabled = false end
-  end)
 
   return S
 end

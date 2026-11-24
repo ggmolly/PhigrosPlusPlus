@@ -14,8 +14,6 @@ local REFRESH = 4 -- seconds between two reads of the open rooms
 local NAMING = "Name it in 24 characters at most, or leave it empty to name it after you."
 local C = kit.colours
 local WHITE, DIM, FAINT, DARK, GOLD, GREEN, RED = C.white, C.dim, C.faint, C.dark, C.gold, C.green, C.red
-local LEVEL = { EZ = { 0.29, 0.66, 0.29, 1 }, HD = { 0.23, 0.47, 0.75, 1 }, IN = { 0.77, 0.23, 0.2, 1 },
-  AT = { 0.29, 0.29, 0.32, 1 } }
 local LEVELS = { "EZ", "HD", "IN", "AT" }
 
 -- mp is the mod's state (init.lua), room what it can do: send, enter, join, follow, seat, shown, and the friends mod
@@ -279,7 +277,7 @@ return function(mp, room)
         states[p.player.id] = text(shape.transform, { column - 84, ROW / 2 }, 30, "", DIM, 5, { 1, 0.5 }) -- MiddleRight
         -- what they play the chart with, before what their row says
         if r.chart and not p.watching then
-          plate(shape.transform, { column - 364, ROW - 16 }, { 70, 36 }, LEVEL[p.level], 24, p.level, WHITE)
+          plate(shape.transform, { column - 364, ROW - 16 }, { 70, 36 }, C[p.level], 24, p.level, WHITE)
           local strip = M.strip(shape.transform, p.mods, { 0, ROW / 2 }, 32)
           strip.anchoredPosition = { column - 386 - strip.sizeDelta.x, ROW / 2 }
         end
@@ -315,7 +313,7 @@ return function(mp, room)
       text(root, { cx, cy }, 44, s and s.name or chart.song, WHITE, 3, nil, wide)
       text(root, { cx, cy - 50 }, 28, s and s.composer or "", DIM, 3, nil, wide)
       local rated = s and s.charts[me.level]
-      local picked = plate(root, { cx, cy - 84 }, { 170, 56 }, LEVEL[me.level], 30,
+      local picked = plate(root, { cx, cy - 84 }, { 170, 56 }, C[me.level], 30,
         rated and ("%s %.1f"):format(me.level, rated.constant) or me.level, WHITE)
       if not r.playing then tappable(picked, level) end
       local strip = M.strip(root, me.mods, { cx + 196, cy - 112 }, 52)
@@ -341,7 +339,7 @@ return function(mp, room)
         local shape = kit.bar(list.rows, "phigrospp-room-queued", { 16, -(i - 1) * QUEUED }, { wide, QUEUED - 8 },
           queued.by == mp.me.id and { 1, 1, 1, 0.18 } or FAINT)
         local middle = (QUEUED - 8) / 2
-        plate(shape.transform, { 16, QUEUED - 16 }, { 66, QUEUED - 24 }, LEVEL[queued.level], 22, queued.level, WHITE)
+        plate(shape.transform, { 16, QUEUED - 16 }, { 66, QUEUED - 24 }, C[queued.level], 22, queued.level, WHITE)
         text(shape.transform, { 96, middle }, 28, s and s.name or queued.song, WHITE, 3, nil, wide * 0.52)
         local ends = wide - 28
         if mine(queued) then

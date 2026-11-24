@@ -6,8 +6,28 @@ local UE = CS.UnityEngine
 local kit = phigrospp.ui
 local WHITE, DIM, FAINT, DARK = { 1, 1, 1, 1 }, { 1, 1, 1, 0.5 }, { 1, 1, 1, 0.08 }, { 0.02, 0.13, 0.17, 1 }
 
+-- EZ, HD, IN and AT are what a level's plate is drawn in
 kit.colours = { white = WHITE, dim = DIM, faint = FAINT, dark = DARK, gold = { 1, 0.82, 0.3, 1 },
-  green = { 0.6, 0.92, 0.55, 1 }, red = { 1, 0.5, 0.5, 1 } }
+  green = { 0.6, 0.92, 0.55, 1 }, red = { 1, 0.5, 0.5, 1 }, EZ = { 0.29, 0.66, 0.29, 1 }, HD = { 0.23, 0.47, 0.75, 1 },
+  IN = { 0.77, 0.23, 0.2, 1 }, AT = { 0.29, 0.29, 0.32, 1 } }
+
+-- the song list reads the touches itself: it's off under a view's panel (a page turns it off for itself), and back
+-- on once none shows
+local views, covered = {}
+on("update", function()
+  local showing = false
+  for _, view in ipairs(views) do showing = showing or view.shown() ~= nil end
+  if showing and not il2cpp.alive(covered) then
+    covered = scene() == "SongSelector" and UE.Object.FindObjectOfType(CS.SongSelector) or nil
+  end
+  if covered and not kit.paging() then covered.enabled = not showing end
+  if not showing then covered = nil end
+end)
+
+-- a reload destroys the panel, the song list comes back at once
+on("unload", function()
+  if il2cpp.alive(covered) then covered.enabled = true end
+end)
 
 -- a checkbox ending at pos, its box before its label, both `size` high: fn runs when either is tapped. returns what
 -- ticks it or not, and how wide it is
@@ -138,5 +158,6 @@ function kit.view(name)
   -- the screen whose panel shows, nil for none
   function V.shown() return panel and il2cpp.alive(panel.transform) and panel.screen or nil end
 
+  views[#views + 1] = V
   return V
 end
