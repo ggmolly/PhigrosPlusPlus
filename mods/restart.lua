@@ -1,5 +1,5 @@
 -- instant restart: the pause menu's Retry and holding the pause button put the song back at its start in place,
--- without loading the level again
+-- without loading the level again (a challenge run starts again from its first song)
 
 local enabled = setting("Instant restart", true)
 local HOLD = 0.3 -- seconds the pause button is held to restart

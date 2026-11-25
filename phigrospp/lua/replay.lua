@@ -581,12 +581,12 @@ hook(START, "<Start>g__UpdateRecord|18", {
   end,
 })
 
--- back to the song list without a result screen (a replay quit, a reload in a custom song): ProgressControl.Update
--- only acts on a level break once the level is over, then goes to the next scene instead of the result screen
-function phigrospp.leave()
+-- back to the song list (or scene) without a result screen (a replay quit, a reload in a custom song): ProgressControl
+-- .Update only acts on a level break once the level is over, then goes to the next scene instead of the result screen
+function phigrospp.leave(scene)
   setJudging(true)
   level.judgeControl.stopJudge = true
-  CS.GameInformation.nextScene = "SongSelector"
+  CS.GameInformation.nextScene = scene or "SongSelector"
   level.progressControl:LevelBreak("Loading")
   level.levelInformation.levelOver = true
 end

@@ -214,8 +214,8 @@ on("update", function()
   if dark then dark.color = BLACK end
   if not broken or replaying() then return end
   broken = false
-  -- a song that can't start again (a room's) is left, as with Sudden Death
-  if has("PF") and phigrospp.pausing() then return phigrospp.restart() end
+  -- a song that can't start again (a room's, the secret challenge's) is left, as with Sudden Death
+  if has("PF") and phigrospp.restart() then return end
   phigrospp.leave()
 end)
 

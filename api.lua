@@ -1245,11 +1245,13 @@ function replaying() end
 function phigrospp.jump(t, to, from) end
 
 ---Puts the song being played back at its start in place, every note unjudged and nothing scored, the music waiting
----like a fresh start.
+---like a fresh start. In Challenge Mode the run starts again from its first song instead. Returns whether it could:
+---not while `phigrospp.pausing()` is false nor in the chapter 9 secret challenge, which the game never retries.
 ---```lua
 ---button("Restart", phigrospp.restart)
 ---on("restart", function() print("again") end)
 ---```
+---@return boolean
 function phigrospp.restart() end
 
 ---Given false, the song being played can't be paused from its button nor started again until it's left, for a play

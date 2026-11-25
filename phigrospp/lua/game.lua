@@ -309,11 +309,25 @@ function phigrospp.speed(x)
   if not ticking and x ~= 1 then clock, ticking = music.time, hook(CS.ProgressControl, "Update", { before = tick }) end
 end
 
+-- a challenge run starts again from its first song as the game's Retry after it does (ChallengeModeOverControl):
+-- at index 0 ChallengeModeControl keeps no result of the song left. the chapter 9 secret run has no Retry
+local function restartRun()
+  local info = CS.GameInformation.main
+  if info.secretChallengeLifeEnabled then return false end
+  info.nowChallengeIndex = 0
+  local songs = info.challengeSongItems
+  while songs._size > 3 do songs:RemoveAt(3) end -- a hidden song joins the run as its 4th
+  CS.Phigros2.ChallengeMode.Scripts.SecretChallengeLifeRules.RestartRun(info)
+  phigrospp.leave("ChallengeMode")
+  return true
+end
+
 -- puts the song being played back at its start in place, every note unjudged and nothing scored. the game then
 -- waits before the music like a fresh start does, a replay plays its own recorded start instead
 function phigrospp.restart()
-  if nonstop then return end
+  if nonstop then return false end
   local progress = stage.progressControl
+  if progress._inChallengeMode and not replaying() then return restartRun() end
   if not replaying() and progress.isPlaying then progress:Play(false) end -- the music stops as the pause button does
   phigrospp.jump(0)
   for _, field in ipairs(SCORE) do scorer[field] = fresh[field] end
@@ -330,6 +344,7 @@ function phigrospp.restart()
     progress.judgeControl.pauseTime = 0 -- the ring a first tap on the pause button shows
   end
   emit("restart")
+  return true
 end
 
 -- pausing(false): the song being played can't be paused from its button nor started again until it's left, for a
