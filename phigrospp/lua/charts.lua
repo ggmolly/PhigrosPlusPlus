@@ -5,7 +5,7 @@ local UE, IO = CS.UnityEngine, CS.System.IO
 local GI, SaveManagement = CS.GameInformation, CS.SaveManagement
 local crypto, json = phigrospp.crypto, phigrospp.json
 local DIR = phigrospp.root .. "/charts"
-local LEVELS = { "EZ", "HD", "IN", "AT" }
+local LEVELS = { "EZ", "HD", "IN", "AT", "SP" } -- SP: the April Fools charts, levelled "?" like the game showed them
 local DOMAIN = "phigros++ charts v1\0" -- so a chart key's signature can't pass for anything else
 local ALWAYS = -1 -- the unlockType of songs and charts that are always unlocked
 local MONEY = 1 -- the unlockType of songs bought with data
@@ -38,7 +38,7 @@ local KEYS = {
   chapter = { code = 1, title = 1, subtitle = 1, banner = 1, after = 1, cover = 1, blur = 1, songs = 1, files = 1 },
   song = { folder = 1, title = 1, artist = 1, illustrator = 1, preview = 1, price = 1, music = 1, cover = 1, blur = 1,
     levels = 1 },
-  levels = { EZ = 1, HD = 1, IN = 1, AT = 1 },
+  levels = { EZ = 1, HD = 1, IN = 1, AT = 1, SP = 1 },
   level = { difficulty = 1, charter = 1, chart = 1 },
 }
 
@@ -74,8 +74,10 @@ local function define(def, base, url, key)
       local l = (d.levels or {})[name]
       if l then
         known(l, "level", where .. " " .. name)
-        if type(l.difficulty) ~= "number" then error(("%s needs a difficulty for %s"):format(where, name), 0) end
-        s.levels[#s.levels + 1] = { name = name, difficulty = l.difficulty, charter = credit(l.charter, "a charter for " .. name, where),
+        if name ~= "SP" and type(l.difficulty) ~= "number" then
+          error(("%s needs a difficulty for %s"):format(where, name), 0)
+        end
+        s.levels[#s.levels + 1] = { name = name, difficulty = l.difficulty or 0, charter = credit(l.charter, "a charter for " .. name, where),
           chart = locate(c, credit(file(l.chart, name .. ".phc"), "a chart for " .. name, where), s.id, name) }
       end
     end
@@ -214,7 +216,7 @@ local function songsItem(s)
   for _, l in ipairs(s.levels) do named[l.name] = true end
   for _, l in ipairs(s.levels) do levels[#levels + 1] = l end
   for _, name in ipairs(LEVELS) do
-    if not named[name] then levels[#levels + 1] = { name = name, difficulty = 0, charter = "" } end
+    if not named[name] and #levels < 4 then levels[#levels + 1] = { name = name, difficulty = 0, charter = "" } end
   end
   for i, l in ipairs(levels) do
     levels[i], difficulty[i], charter[i] = l.name, l.difficulty, l.charter
@@ -417,11 +419,12 @@ hook(CS.SongSelectorItem, ".ctor", 4, {
 })
 
 -- the level slider names and colours a level by its position: it gets our song's order, or the game's back
-local POSITION = { EZ = 0, HD = 1, IN = 2, AT = 3 }
+local POSITION = { EZ = 0, HD = 1, IN = 2, AT = 3, SP = 4 }
 local colors
 
 local function slide(slider)
-  colors = colors or { [0] = slider.levelColor[0], slider.levelColor[1], slider.levelColor[2], slider.levelColor[3] }
+  colors = colors or { [0] = slider.levelColor[0], slider.levelColor[1], slider.levelColor[2], slider.levelColor[3],
+    { 0.45, 0.45, 0.45, 1 } }
   list = il2cpp.alive(list) and list or UE.Object.FindObjectOfType(CS.SongSelector)
   local s = byId[list.SongItems._items[list.nowSong].songInfo.songsId]
   for i = 0, 3 do
@@ -430,13 +433,44 @@ local function slide(slider)
   end
 end
 
+-- an SP level is "?" wherever the game writes a level's number: its level bar still has that look (HideInfo)
+local function sp(slider) return CS.LevelSliderController.LEVEL_NAMES[slider.targetLevel] == "SP" end
+local function unknown(slider)
+  if sp(slider) then slider.difficultyText.text = "?" end
+end
+
 hook(CS.LevelSliderController, "MoveToLevel", { before = slide })
-hook(CS.LevelSliderController, "JumpToLevel", { before = slide })
+hook(CS.LevelSliderController, "JumpToLevel", { before = slide, after = unknown })
+hook(il2cpp.find("%f[%w]LevelSliderController%.<Anim>")[1], "MoveNext", {
+  after = function(self) unknown(self["<>4__this"]) end,
+})
+hook(CS.SongSelector, "SetText", {
+  after = function(selector)
+    if sp(selector.levelSliderController) then selector.difficulty.text = "?" end
+  end,
+})
+hook(CS.SongSelectorItem, "SetText", {
+  after = function(item, level)
+    if item["<Unlocked>k__BackingField"] and level < item["<PlayableLevelCount>k__BackingField"]
+      and item.songInfo.levels[level] == "SP" then
+      item.selectorItemUpside.difficulty.text, item.selectorItemDownside.difficulty.text = "?", "?"
+    end
+  end,
+})
+hook(CS.LevelInfo, "UpdateInfo", {
+  skip = function(info, level)
+    if level ~= "SP" then return false end
+    info:HideInfo(level)
+    return true
+  end,
+})
 
 -- the level loads the plain song's EZ chart (its asset must exist), then ours replaces it before anything reads it
 hook(CS.SongsItem, "GetLevelStartInfo", {
   after = function(item, _, info)
-    if byId[item.songsId] then info.chartAddressableKey = ("Assets/Tracks/%s/Chart_EZ.json"):format(plainSong().songsId) end
+    if not byId[item.songsId] then return end
+    info.chartAddressableKey = ("Assets/Tracks/%s/Chart_EZ.json"):format(plainSong().songsId)
+    if info.songsLevel == "SP" then info.songsDifficulty = "?" end
   end,
 })
 

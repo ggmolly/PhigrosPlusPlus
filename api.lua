@@ -12,7 +12,7 @@ Your editor knows all of this: `node mod.mjs new` sets it up ([[Your first mod]]
 the latest `api.lua` into a mod made before.
 ]=]
 
----@alias Difficulty "EZ"|"HD"|"IN"|"AT"
+---@alias Difficulty "EZ"|"HD"|"IN"|"AT"|"SP"
 ---@alias Judgement "perfect"|"good"|"bad"|"miss"
 ---`{ r, g, b, a }` from 0 to 1
 ---@alias Colour number[]
