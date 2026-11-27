@@ -1,6 +1,6 @@
 # phigros++ development against the device plugged in over adb, see the wiki's Development page
 
-APKS ?= ../apks/Phigros-4.1.0
+APKS ?= ../apks/Phigros-4.1.0.1
 # the game's decrypted ipa, for make ipa
 IPA ?= ../apks/Phigros-ios-4.0.4/Phigros.ipa
 # Phigros++ installs as its own app, next to the game
