@@ -409,6 +409,13 @@ on("scene", function()
   created = alive
 end)
 
+-- a version as a number to compare, as bundle.c does: a beta ("1.2.3-beta.4") comes before its release
+function phigrospp.versionNumber(version)
+  local major, minor, patch, rest = version:match("^(%d+)%.(%d+)%.(%d+)(.*)$")
+  local beta = rest == "" and 999 or tonumber(rest:match("^%-beta%.(%d+)$"))
+  return ((tonumber(major) * 1000 + tonumber(minor)) * 1000 + tonumber(patch)) * 1000 + beta
+end
+
 -- files: read whole, written through a temporary file so a crash never leaves half of one. bundle/<path> is a file of
 -- the bundle, as built-in mods see theirs
 function phigrospp.read(path)

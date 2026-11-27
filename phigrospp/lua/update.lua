@@ -3,8 +3,8 @@
 
 local ui = phigrospp.ui
 local DOWNLOAD = "https://github.com/ggmolly/PhigrosPlusPlus/releases/latest/download/"
--- on ios phigros++ is patched into the game again from a computer (the wiki's Development page)
-local INSTALLER = phigrospp.platform == "ios" and "https://github.com/ggmolly/PhigrosPlusPlus/releases/latest"
+-- on ios the game is patched again on phigros.tools
+local INSTALLER = phigrospp.platform == "ios" and "https://phigros.tools/phigrospp?device=ios"
   or "https://github.com/ggmolly/PhigrosPlusPlus-Installer/releases/latest"
 local SKIPPED = phigrospp.root .. "/skipped" -- the last version the player skipped
 
@@ -12,12 +12,7 @@ local SKIPPED = phigrospp.root .. "/skipped" -- the last version the player skip
 -- screen, and what dismisses that toast
 local latest, game, prompt, dismiss
 
--- as bundle.c compares them: a beta ("1.2.3-beta.4") comes before its release
-local function number(version)
-  local major, minor, patch, rest = version:match("^(%d+)%.(%d+)%.(%d+)(.*)$")
-  local beta = rest == "" and 999 or tonumber(rest:match("^%-beta%.(%d+)$"))
-  return ((tonumber(major) * 1000 + tonumber(minor)) * 1000 + tonumber(patch)) * 1000 + beta
-end
+local number = phigrospp.versionNumber
 
 local function skipped()
   local file = io.open(SKIPPED, "rb")
@@ -60,8 +55,8 @@ end
 local function offer()
   if game then
     local ios = phigrospp.platform == "ios"
-    if ui.confirm({ title = "Phigros++ " .. latest, no = "Skip", yes = ios and "Open the release" or "Open the installer",
-          message = (ios and "This update for Phigros %s is patched into the game from a computer."
+    if ui.confirm({ title = "Phigros++ " .. latest, no = "Skip", yes = ios and "Open phigros.tools" or "Open the installer",
+          message = (ios and "This update for Phigros %s is patched into the game again on phigros.tools."
             or "This update for Phigros %s is installed with the Phigros++ Installer."):format(game) }) then
       -- the installer that installed this app, else its download on the release page
       if not phigrospp.launch("sh.molly.phigrosplusplus.installer") then
@@ -98,11 +93,13 @@ phigrospp.fetch("GET", DOWNLOAD .. "phigrospp.version", nil, function(status, li
   for platform, listed in games:gmatch("(%a+):(%S+)") do
     if platform == phigrospp.platform then newest, runs = listed, runs or listed == phigrospp.game end
   end
-  runs = runs and native == phigrospp.native
+  -- on ios, a game patched before the release's hooks (phigrospp/HOOKS) can't hook all its bundle does
+  local patched = phigrospp.platform ~= "ios" or number(phigrospp.app) >= number(games:match("hooks:(%S+)"))
+  runs = runs and native == phigrospp.native and patched
   if runs and number(version) > number(phigrospp.version) then
     latest = version
   elseif newest and number(version) > number(phigrospp.app)
-    and (native ~= phigrospp.native or newest ~= phigrospp.game) then
+    and (native ~= phigrospp.native or newest ~= phigrospp.game or not patched) then
     latest, game = version, newest
   else
     return

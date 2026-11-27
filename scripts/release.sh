@@ -22,6 +22,16 @@ fi
 export PHIGROSPP_SIGNING_KEY
 [ -f "$MOD/build/libphigrospp.so" ] || { echo "build/libphigrospp.so is missing, run make lib" >&2; exit 1; }
 [ -f "$MOD/build/phigrospp.ios" ] || { echo "build/phigrospp.ios is missing, run make ios" >&2; exit 1; }
+# a game patched with the release of phigrospp/HOOKS must hook everything this one does, or ios players taking it in
+# the game would lose phigros++: such a release names itself there, and update.lua sends them to patch the game again
+HOOKS=$(cat "$MOD/phigrospp/HOOKS")
+if [ "$HOOKS" != "$(cat "$MOD/phigrospp/VERSION")" ]; then
+  gh release download "v$HOOKS" -R ggmolly/PhigrosPlusPlus -p phigrospp.ios -O "$MOD/build/hooks.ios" --clobber
+  NEW=$(node "$MOD/scripts/hooks.ts" "${IPA:-$MOD/../apks/Phigros-ios-4.0.4/Phigros.ipa}" "$MOD/build/phigrospp.ios" \
+    "$MOD/build/hooks.ios")
+  [ -z "$NEW" ] || { printf 'a game patched with %s cant hook:\n%s\nset phigrospp/HOOKS to phigrospp/VERSION\n' \
+    "$HOOKS" "$NEW" >&2; exit 1; }
+fi
 "$MOD/scripts/bundle.sh"
 mkdir -p "$MOD/out"
 cp "$MOD/build/libphigrospp.so" "$MOD/out/libphigrospp.so"

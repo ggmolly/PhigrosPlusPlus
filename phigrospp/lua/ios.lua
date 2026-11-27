@@ -1,6 +1,16 @@
 -- the ios side of the platform api (android.lua has the same functions). phigrospp.thermal and refreshRate come from ios.c
 if phigrospp.platform ~= "ios" then return end
 
+-- a downloaded bundle hooking methods this app's patch has no room for gives way to the built-in one, before anything
+-- hooks (this runs right after prelude). skipped, so an older built-in update.lua doesn't offer it again
+if phigrospp.version ~= phigrospp.app
+  and phigrospp.versionNumber(phigrospp.app) < phigrospp.versionNumber(phigrospp.bundle.HOOKS:match("%S+")) then
+  phigrospp.write(phigrospp.root .. "/skipped", phigrospp.version)
+  os.remove(phigrospp.root .. "/bundle")
+  phigrospp.reload()
+  error(("Phigros++ %s needs the game patched again, back to %s"):format(phigrospp.version, phigrospp.app), 0)
+end
+
 local UE = CS.UnityEngine
 
 -- no share sheet without objective-c, the text goes to the clipboard instead

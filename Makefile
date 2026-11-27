@@ -88,7 +88,7 @@ profile:
 # the signed bundle, its version line, the lib, the installer's manifest and what patches the ios game in out/ (needs
 # the release key, see scripts/release.sh)
 release: $(LIB) $(IOS)
-	scripts/release.sh
+	IPA=$(IPA) scripts/release.sh
 
 # a github release of phigrospp/VERSION with what release made. the installer has its own releases
 # (github.com/ggmolly/PhigrosPlusPlus-Installer) and patches the game with this one
